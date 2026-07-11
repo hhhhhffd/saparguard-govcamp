@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PIL import Image
+from starlette.requests import Request
 from sqlalchemy.dialects import postgresql
 
 from app.collector.history import message_is_within_history_window
 from app.core.enums import MediaJobStatus
 from app.database.repositories.messages import MessageRepository
 from app.processing.media.plate_recognizer import normalize_plate
+from app.processing.media.image_processor import save_optimized_image
 from app.database.repositories.media_jobs import MediaJobRepository
+from app.web import templating
+from app.web.routes import fragments
 from app.web.templating import templates
 
 
@@ -154,3 +160,50 @@ def test_telegram_text_is_escaped_by_jinja() -> None:
 
     assert "<script>alert(1)</script>" not in rendered
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+
+
+def test_display_datetime_uses_configured_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(templating.settings, "display_timezone", "UTC")
+
+    result = templating.format_display_datetime(datetime(2026, 7, 12, 8, 5, 3, tzinfo=timezone.utc))
+
+    assert result == "08.05.03 12.07.2026"
+
+
+@pytest.mark.asyncio
+async def test_messages_fragment_pushes_a_full_page_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = {
+        "messages": [],
+        "has_more": False,
+        "next_cursor": None,
+        "filters": {"limit": 50, "query": "taxi"},
+        "next_page_query": "limit=50&query=taxi",
+        "page_url": "/messages?limit=50&query=taxi",
+    }
+    monkeypatch.setattr(fragments, "message_page_context", AsyncMock(return_value=context))
+    request = Request({"type": "http", "method": "GET", "path": "/ui/fragments/messages"})
+
+    response = await fragments.messages_table(request, query="taxi", session=MagicMock())
+
+    assert response.headers["HX-Push-Url"] == "/messages?limit=50&query=taxi"
+
+
+def test_image_processing_uses_unique_temporary_paths(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    media_root = tmp_path / "media"
+    first_source = tmp_path / "first" / "photo.png"
+    second_source = tmp_path / "second" / "photo.png"
+    first_source.parent.mkdir()
+    second_source.parent.mkdir()
+    Image.new("RGB", (8, 8), "red").save(first_source)
+    Image.new("RGB", (8, 8), "blue").save(second_source)
+    monkeypatch.setattr(templating.settings, "media_storage_path", media_root)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(save_optimized_image, (first_source, second_source)))
+
+    assert {path for _, path in results} == {
+        media_root / f"{values['sha256']}.jpg" for values, _ in results
+    }
+    assert not list(media_root.glob(".processing-*"))

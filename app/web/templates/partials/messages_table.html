@@ -5,7 +5,7 @@
     <thead class="border-b bg-slate-50 text-slate-600"><tr><th class="p-3">Дата</th><th class="p-3">Чат</th><th class="p-3">Отправитель</th><th class="p-3">Текст</th><th class="p-3">Медиа</th><th class="p-3">Статус</th></tr></thead>
     <tbody>
     {% for message in messages %}
-      <tr class="border-b last:border-0"><td class="p-3">{{ message.published_at }}</td><td class="p-3">{{ message.chat.title or message.telegram_chat_id }}</td><td class="p-3">{{ message.sender.username if message.sender and message.sender.username else '—' }}</td><td class="p-3 whitespace-pre-wrap break-words">{{ message.text or '—' }}</td><td class="p-3">{{ message.media_type or '—' }}</td><td class="p-3">{% if message.is_deleted %}удалено{% elif message.edited_at %}изменено{% else %}—{% endif %} <button class="ml-2 underline" hx-get="/ui/fragments/messages/{{ message.id }}" hx-target="#message-detail" hx-swap="innerHTML">Детали</button></td></tr>
+      <tr class="border-b last:border-0"><td class="p-3">{{ message.published_at|display_datetime }}</td><td class="p-3">{{ message.chat.title or message.telegram_chat_id }}</td><td class="p-3">{{ message.sender.username if message.sender and message.sender.username else '—' }}</td><td class="p-3 whitespace-pre-wrap break-words">{{ message.text or '—' }}</td><td class="p-3">{{ message.media_type or '—' }}</td><td class="p-3">{% if message.is_deleted %}удалено{% elif message.edited_at %}изменено{% else %}—{% endif %} <button class="ml-2 underline" hx-get="/ui/fragments/messages/{{ message.id }}" hx-target="#message-detail" hx-swap="innerHTML">Детали</button></td></tr>
     {% endfor %}
     </tbody>
   </table>

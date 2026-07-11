@@ -56,12 +56,16 @@ async def message_page_context(
     pagination_values = {key: value for key, value in filters.items() if value != ""}
     if next_cursor:
         pagination_values.update(next_cursor)
+    page_values = {key: value for key, value in filters.items() if value != ""}
+    if cursor_sent_at is not None and cursor_id is not None:
+        page_values.update({"cursor_sent_at": cursor_sent_at.isoformat(), "cursor_id": cursor_id})
     return {
         "messages": messages,
         "has_more": has_more,
         "next_cursor": next_cursor,
         "filters": filters,
         "next_page_query": urlencode(pagination_values),
+        "page_url": f"/messages?{urlencode(page_values)}" if page_values else "/messages",
     }
 
 

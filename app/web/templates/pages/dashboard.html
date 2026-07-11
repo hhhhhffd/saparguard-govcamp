@@ -5,7 +5,7 @@
   {% for key, value in stats.items() %}
   <article class="rounded border border-slate-200 bg-white p-4 shadow-sm">
     <small class="text-slate-500">{{ key }}</small>
-    <strong class="mt-1 block text-xl">{{ value if value is not none else '—' }}</strong>
+    <strong class="mt-1 block text-xl">{{ value|display_datetime if key == 'last_message_at' else value }}</strong>
   </article>
   {% endfor %}
 </div>

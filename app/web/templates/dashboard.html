@@ -1,4 +1,0 @@
-{% extends "base.html" %}{% block content %}
-<h1>Состояние сборщика</h1><div id="stats" class="cards">Загрузка…</div><h2>Последние ошибки</h2><pre id="errors">Загрузка…</pre>
-<script>const tz={{ display_timezone|tojson }};function date(value){if(!value)return '—';const p=new Intl.DateTimeFormat('ru-RU',{timeZone:tz,hour:'2-digit',minute:'2-digit',second:'2-digit',day:'2-digit',month:'2-digit',year:'numeric',hour12:false}).formatToParts(new Date(value)).reduce((a,x)=>(a[x.type]=x.value,a),{});return `${p.hour}.${p.minute}.${p.second} ${p.day}.${p.month}.${p.year}`}Promise.all([fetch('/api/stats').then(r=>r.json()),fetch('/api/collector/status').then(r=>r.json())]).then(([s,c])=>{stats.innerHTML=Object.entries(s).map(([k,v])=>`<article><small>${k}</small><strong>${k==='last_message_at'?date(v):v??'—'}</strong></article>`).join('');errors.textContent=JSON.stringify(c.errors,null,2)||'Нет ошибок';});</script>
-{% endblock %}

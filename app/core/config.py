@@ -33,6 +33,7 @@ class Settings(BaseSettings):
         default=100, validation_alias="COLLECTOR_HISTORY_BATCH_SIZE"
     )
     collector_history_days: int = Field(default=7, ge=1, validation_alias="COLLECTOR_HISTORY_DAYS")
+    # FastALPR is a process-global lazy instance; concurrency waits for a thread-safety review.
     alpr_worker_count: int = Field(default=1, ge=1, validation_alias="ALPR_WORKER_COUNT")
     media_job_max_attempts: int = Field(default=3, ge=1, validation_alias="MEDIA_JOB_MAX_ATTEMPTS")
     media_job_retry_delay_seconds: int = Field(

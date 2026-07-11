@@ -41,7 +41,9 @@ async def messages_table(
     )
     context["request"] = request
     context["display_timezone"] = settings.display_timezone
-    return templates.TemplateResponse(request, "partials/messages_table.html", context)
+    response = templates.TemplateResponse(request, "partials/messages_table.html", context)
+    response.headers["HX-Push-Url"] = str(context["page_url"])
+    return response
 
 
 @router.get("/sources", response_class=HTMLResponse)
