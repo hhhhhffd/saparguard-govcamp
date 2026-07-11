@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
-
 from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.models.base import Base
@@ -40,7 +37,6 @@ class TelegramUser(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    raw_data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     messages: Mapped[list[TelegramMessage]] = relationship(back_populates="sender")
@@ -61,17 +57,13 @@ class TelegramMessage(Base):
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    reply_to_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_forwarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    forward_source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    has_media: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    forward_source_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    forward_source_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     media_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    views: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    forwards: Mapped[int | None] = mapped_column(Integer, nullable=True)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    raw_data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
     chat: Mapped[TelegramChat] = relationship(back_populates="messages")
     sender: Mapped[TelegramUser | None] = relationship(back_populates="messages")
@@ -85,7 +77,6 @@ class MessageEdit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     message_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), index=True)
     previous_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    previous_raw_data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     message: Mapped[TelegramMessage] = relationship(back_populates="edits")
@@ -113,8 +104,6 @@ class MediaFile(Base):
     original_mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     relative_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     processing_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")

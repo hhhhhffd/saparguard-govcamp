@@ -39,7 +39,6 @@ class MessageRepository:
                 MessageEdit(
                     message_id=existing.id,
                     previous_text=existing.text,
-                    previous_raw_data=existing.raw_data,
                     detected_at=datetime.now(timezone.utc),
                 )
             )
@@ -89,7 +88,6 @@ class MessageRepository:
         sender_id: int | None,
         date_from: datetime | None,
         date_to: datetime | None,
-        has_media: bool | None,
     ) -> tuple[list[TelegramMessage], int]:
         filters = []
         if query:
@@ -102,8 +100,6 @@ class MessageRepository:
             filters.append(TelegramMessage.published_at >= date_from)
         if date_to is not None:
             filters.append(TelegramMessage.published_at <= date_to)
-        if has_media is not None:
-            filters.append(TelegramMessage.has_media.is_(has_media))
         if cursor_sent_at is not None and cursor_id is not None:
             filters.append(
                 (TelegramMessage.published_at < cursor_sent_at)

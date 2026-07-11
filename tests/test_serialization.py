@@ -1,12 +1,24 @@
-from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from app.collector.serialization import to_jsonable
+from telethon.tl import types
+
+from app.collector.serialization import message_values
 
 
-def test_to_jsonable_converts_datetime_and_bytes() -> None:
-    value = {"when": datetime(2026, 7, 11, tzinfo=timezone.utc), "content": b"abc"}
+def test_message_values_keeps_only_compact_forward_metadata() -> None:
+    message = SimpleNamespace(
+        id=42,
+        sender_id=11,
+        message="text",
+        date=None,
+        fwd_from=SimpleNamespace(from_id=types.PeerUser(99), from_name="Forwarded sender", post_author=None),
+        media=None,
+        edit_date=None,
+    )
 
-    result = to_jsonable(value)
+    values = message_values(message, -100123)
 
-    assert result["when"] == "2026-07-11T00:00:00+00:00"
-    assert result["content"] == {"type": "bytes", "length": 3}
+    assert values["forward_source_id"] == 99
+    assert values["forward_source_name"] == "Forwarded sender"
+    assert "raw_data" not in values
+    assert "views" not in values

@@ -53,7 +53,6 @@ def save_optimized_image(source_path: Path) -> tuple[dict[str, Any], Path]:
             image.close()
             image = converted
         image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
-        width, height = image.size
         image.save(temporary_output, "JPEG", quality=82, optimize=True)
         image.close()
     digest = hashlib.sha256()
@@ -70,8 +69,6 @@ def save_optimized_image(source_path: Path) -> tuple[dict[str, Any], Path]:
         {
             "relative_path": f"media/{destination.name}",
             "mime_type": "image/jpeg",
-            "width": width,
-            "height": height,
             "size_bytes": destination.stat().st_size,
             "sha256": sha256,
         },

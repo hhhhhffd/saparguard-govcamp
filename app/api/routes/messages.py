@@ -27,18 +27,14 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 def serialize_message(message: TelegramMessage, include_details: bool = False) -> MessageRead | MessageDetailRead:
     data: dict[str, Any] = {
         "id": message.id,
-        "telegram_chat_id": message.telegram_chat_id,
         "telegram_message_id": message.telegram_message_id,
         "text": message.text,
         "published_at": message.published_at,
         "saved_at": message.saved_at,
-        "reply_to_message_id": message.reply_to_message_id,
         "is_forwarded": message.is_forwarded,
-        "forward_source": message.forward_source,
-        "has_media": message.has_media,
+        "forward_source_id": message.forward_source_id,
+        "forward_source_name": message.forward_source_name,
         "media_type": message.media_type,
-        "views": message.views,
-        "forwards": message.forwards,
         "edited_at": message.edited_at,
         "is_deleted": message.is_deleted,
         "deleted_at": message.deleted_at,
@@ -60,12 +56,10 @@ def serialize_message(message: TelegramMessage, include_details: bool = False) -
         ),
     }
     if include_details:
-        data["raw_data"] = message.raw_data
         data["edits"] = [
             MessageEditRead(
                 id=edit.id,
                 previous_text=edit.previous_text,
-                previous_raw_data=edit.previous_raw_data,
                 detected_at=edit.detected_at,
             )
             for edit in message.edits
@@ -74,8 +68,6 @@ def serialize_message(message: TelegramMessage, include_details: bool = False) -
             MediaFileRead(
                 id=media.id,
                 mime_type=media.mime_type,
-                width=media.width,
-                height=media.height,
                 processing_status=media.processing_status,
                 last_error=media.jobs[0].last_error if media.jobs else None,
                 plates=[
@@ -103,7 +95,6 @@ async def list_messages(
     sender_id: int | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-    has_media: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> MessagePage:
     if (cursor_sent_at is None) != (cursor_id is None):
@@ -117,7 +108,6 @@ async def list_messages(
         sender_id=sender_id,
         date_from=date_from,
         date_to=date_to,
-        has_media=has_media,
     )
     next_cursor = (
         MessageCursor(sent_at=messages[-1].published_at, id=messages[-1].id)

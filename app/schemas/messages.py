@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
-
 from pydantic import BaseModel
 
 
@@ -22,18 +20,14 @@ class ChatShortRead(BaseModel):
 
 class MessageRead(BaseModel):
     id: int
-    telegram_chat_id: int
     telegram_message_id: int
     text: str | None
     published_at: datetime
     saved_at: datetime
-    reply_to_message_id: int | None
     is_forwarded: bool
-    forward_source: dict[str, Any] | None
-    has_media: bool
+    forward_source_id: int | None
+    forward_source_name: str | None
     media_type: str | None
-    views: int | None
-    forwards: int | None
     edited_at: datetime | None
     is_deleted: bool
     deleted_at: datetime | None
@@ -44,7 +38,6 @@ class MessageRead(BaseModel):
 class MessageEditRead(BaseModel):
     id: int
     previous_text: str | None
-    previous_raw_data: dict[str, Any]
     detected_at: datetime
 
 
@@ -57,15 +50,12 @@ class PlateDetectionRead(BaseModel):
 class MediaFileRead(BaseModel):
     id: int
     mime_type: str | None
-    width: int | None
-    height: int | None
     processing_status: str
     last_error: str | None
     plates: list[PlateDetectionRead]
 
 
 class MessageDetailRead(MessageRead):
-    raw_data: dict[str, Any]
     edits: list[MessageEditRead]
     media_files: list[MediaFileRead]
 
