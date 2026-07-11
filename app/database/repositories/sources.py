@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import TelegramChat, TelegramMessage
@@ -21,7 +21,9 @@ class SourceRepository:
                 func.count(TelegramMessage.id).label("message_count"),
                 func.max(TelegramMessage.published_at).label("last_message_at"),
             )
-            .outerjoin(TelegramMessage, TelegramMessage.telegram_chat_id == TelegramChat.telegram_chat_id)
+            .outerjoin(
+                TelegramMessage, TelegramMessage.telegram_chat_id == TelegramChat.telegram_chat_id
+            )
             .where(TelegramChat.removed_at.is_(None))
             .group_by(TelegramChat.id)
             .order_by(TelegramChat.created_at.desc())
@@ -33,9 +35,21 @@ class SourceRepository:
 
     async def get_active(self) -> list[TelegramChat]:
         result = await self._session.scalars(
-            select(TelegramChat).where(TelegramChat.is_active.is_(True), TelegramChat.removed_at.is_(None))
+            select(TelegramChat).where(
+                TelegramChat.is_active.is_(True), TelegramChat.removed_at.is_(None)
+            )
         )
         return list(result)
+
+    async def is_active_chat(self, telegram_chat_id: int) -> bool:
+        statement = select(
+            exists().where(
+                TelegramChat.telegram_chat_id == telegram_chat_id,
+                TelegramChat.is_active.is_(True),
+                TelegramChat.removed_at.is_(None),
+            )
+        )
+        return bool(await self._session.scalar(statement))
 
     async def create(
         self,
@@ -58,8 +72,7 @@ class SourceRepository:
             created_at=datetime.now(timezone.utc),
         )
         self._session.add(source)
-        await self._session.commit()
-        await self._session.refresh(source)
+        await self._session.flush()
         return source
 
     async def update_resolved(
@@ -83,7 +96,6 @@ class SourceRepository:
                 last_error=None,
             )
         )
-        await self._session.commit()
 
     async def set_active(self, source_id: int, is_active: bool) -> TelegramChat | None:
         source = await self.get(source_id)
@@ -91,8 +103,6 @@ class SourceRepository:
             return None
         source.is_active = is_active
         source.updated_at = datetime.now(timezone.utc)
-        await self._session.commit()
-        await self._session.refresh(source)
         return source
 
     async def remove(self, source_id: int) -> bool:
@@ -101,7 +111,6 @@ class SourceRepository:
             return False
         source.is_active = False
         source.removed_at = datetime.now(timezone.utc)
-        await self._session.commit()
         return True
 
     async def request_history(self, source_id: int) -> TelegramChat | None:
@@ -109,8 +118,6 @@ class SourceRepository:
         if source is None:
             return None
         source.history_requested_at = datetime.now(timezone.utc)
-        await self._session.commit()
-        await self._session.refresh(source)
         return source
 
     async def clear_history_request(self, source_id: int) -> None:
@@ -119,23 +126,28 @@ class SourceRepository:
             .where(TelegramChat.id == source_id)
             .values(history_requested_at=None, updated_at=datetime.now(timezone.utc))
         )
-        await self._session.commit()
 
     async def record_sync(self, source_id: int) -> None:
         await self._session.execute(
             update(TelegramChat)
             .where(TelegramChat.id == source_id)
-            .values(last_synced_at=datetime.now(timezone.utc), last_error=None, updated_at=datetime.now(timezone.utc))
+            .values(
+                last_synced_at=datetime.now(timezone.utc),
+                last_error=None,
+                updated_at=datetime.now(timezone.utc),
+            )
         )
-        await self._session.commit()
 
     async def record_sync_for_chat(self, telegram_chat_id: int) -> None:
         await self._session.execute(
             update(TelegramChat)
             .where(TelegramChat.telegram_chat_id == telegram_chat_id)
-            .values(last_synced_at=datetime.now(timezone.utc), last_error=None, updated_at=datetime.now(timezone.utc))
+            .values(
+                last_synced_at=datetime.now(timezone.utc),
+                last_error=None,
+                updated_at=datetime.now(timezone.utc),
+            )
         )
-        await self._session.commit()
 
     async def record_error(self, source_id: int, error: str) -> None:
         await self._session.execute(
@@ -143,4 +155,3 @@ class SourceRepository:
             .where(TelegramChat.id == source_id)
             .values(last_error=error, updated_at=datetime.now(timezone.utc))
         )
-        await self._session.commit()

@@ -5,5 +5,9 @@ deploy
 __pycache__
 *.py[cod]
 .pytest_cache
+web-assets/node_modules
 logs
 data
+deploy
+.codegraph
+.serena

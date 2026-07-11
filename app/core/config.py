@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     media_job_stale_timeout_seconds: int = Field(
         default=900, ge=1, validation_alias="MEDIA_JOB_STALE_TIMEOUT_SECONDS"
     )
-    media_storage_path: Path = Field(default=Path("./data/media"))
+    media_storage_path: Path = Field(
+        default=Path("./data/media"), validation_alias="MEDIA_STORAGE_PATH"
+    )
 
 
 settings = Settings()

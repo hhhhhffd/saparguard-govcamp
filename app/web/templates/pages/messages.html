@@ -1,0 +1,19 @@
+{% extends "layouts/base.html" %}
+{% from "components/button.html" import button %}
+{% block content %}
+<h1 class="text-2xl font-semibold">Сообщения</h1>
+<form class="mt-6 grid gap-3 rounded border border-slate-200 bg-white p-4 md:grid-cols-3" method="get" action="/messages" hx-get="/ui/fragments/messages" hx-target="#messages-results" hx-push-url="true" hx-indicator="#messages-loading">
+  <input class="rounded border border-slate-300 px-3 py-2" name="query" value="{{ filters.query }}" placeholder="Поиск по тексту">
+  <input class="rounded border border-slate-300 px-3 py-2" name="chat_id" value="{{ filters.chat_id }}" placeholder="Telegram chat ID">
+  <input class="rounded border border-slate-300 px-3 py-2" name="sender_id" value="{{ filters.sender_id }}" placeholder="Telegram sender ID">
+  <input class="rounded border border-slate-300 px-3 py-2" name="date_from" value="{{ filters.date_from }}" placeholder="Дата от (ISO 8601)">
+  <input class="rounded border border-slate-300 px-3 py-2" name="date_to" value="{{ filters.date_to }}" placeholder="Дата до (ISO 8601)">
+  <input type="hidden" name="limit" value="{{ filters.limit }}">
+  {{ button('Применить') }}
+</form>
+<p id="messages-loading" class="htmx-indicator mt-2 text-sm text-slate-500">Загрузка…</p>
+<section id="messages-results" class="mt-6">
+  {% include "partials/messages_table.html" %}
+</section>
+<section id="message-detail" class="mt-6"></section>
+{% endblock %}

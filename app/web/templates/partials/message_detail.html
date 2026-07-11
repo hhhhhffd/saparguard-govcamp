@@ -1,0 +1,12 @@
+<article class="rounded border border-slate-200 bg-white p-4">
+  <h2 class="text-lg font-semibold">Сообщение {{ message.telegram_message_id }}</h2>
+  <p class="mt-3 whitespace-pre-wrap break-words">{{ message.text or 'Текст отсутствует' }}</p>
+  {% for media in message.media_files %}
+  <section class="mt-4 border-t pt-4">
+    {% if media.relative_path %}<img class="max-h-96 max-w-full" src="/api/media/{{ media.id }}" alt="Фото сообщения">{% endif %}
+    <p>Статус: {{ media.processing_status }}</p>
+    {% if media.jobs and media.jobs[0].last_error %}<p>Ошибка: {{ media.jobs[0].last_error }}</p>{% endif %}
+    <p>{% for plate in media.plate_detections %}{{ plate.normalized_text }}{% if not loop.last %}, {% endif %}{% else %}Номера не найдены{% endfor %}</p>
+  </section>
+  {% endfor %}
+</article>

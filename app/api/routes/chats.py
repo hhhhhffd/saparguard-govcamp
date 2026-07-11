@@ -11,7 +11,9 @@ from app.schemas.chats import SourceCreate, SourceRead
 router = APIRouter(prefix="/sources", tags=["sources"])
 
 
-def serialize_source(source: TelegramChat, message_count: int = 0, last_message_at: object = None) -> SourceRead:
+def serialize_source(
+    source: TelegramChat, message_count: int = 0, last_message_at: object = None
+) -> SourceRead:
     return SourceRead(
         id=source.id,
         telegram_chat_id=source.telegram_chat_id,
@@ -33,34 +35,46 @@ def serialize_source(source: TelegramChat, message_count: int = 0, last_message_
 @router.get("", response_model=list[SourceRead])
 async def list_sources(session: AsyncSession = Depends(get_session)) -> list[SourceRead]:
     rows = await SourceRepository(session).list()
-    return [serialize_source(source, count, last_message_at) for source, count, last_message_at in rows]
+    return [
+        serialize_source(source, count, last_message_at) for source, count, last_message_at in rows
+    ]
 
 
 @router.post("", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
-async def create_source(payload: SourceCreate, session: AsyncSession = Depends(get_session)) -> SourceRead:
-    source = await SourceRepository(session).create(**payload.model_dump())
+async def create_source(
+    payload: SourceCreate, session: AsyncSession = Depends(get_session)
+) -> SourceRead:
+    async with session.begin():
+        source = await SourceRepository(session).create(**payload.model_dump())
     return serialize_source(source)
 
 
 @router.post("/{source_id}/enable", response_model=SourceRead)
 async def enable_source(source_id: int, session: AsyncSession = Depends(get_session)) -> SourceRead:
-    source = await SourceRepository(session).set_active(source_id, True)
+    async with session.begin():
+        source = await SourceRepository(session).set_active(source_id, True)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return serialize_source(source)
 
 
 @router.post("/{source_id}/disable", response_model=SourceRead)
-async def disable_source(source_id: int, session: AsyncSession = Depends(get_session)) -> SourceRead:
-    source = await SourceRepository(session).set_active(source_id, False)
+async def disable_source(
+    source_id: int, session: AsyncSession = Depends(get_session)
+) -> SourceRead:
+    async with session.begin():
+        source = await SourceRepository(session).set_active(source_id, False)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return serialize_source(source)
 
 
 @router.post("/{source_id}/history", response_model=SourceRead)
-async def request_history(source_id: int, session: AsyncSession = Depends(get_session)) -> SourceRead:
-    source = await SourceRepository(session).request_history(source_id)
+async def request_history(
+    source_id: int, session: AsyncSession = Depends(get_session)
+) -> SourceRead:
+    async with session.begin():
+        source = await SourceRepository(session).request_history(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return serialize_source(source)
@@ -68,6 +82,8 @@ async def request_history(source_id: int, session: AsyncSession = Depends(get_se
 
 @router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_source(source_id: int, session: AsyncSession = Depends(get_session)) -> Response:
-    if not await SourceRepository(session).remove(source_id):
+    async with session.begin():
+        removed = await SourceRepository(session).remove(source_id)
+    if not removed:
         raise HTTPException(status_code=404, detail="Source not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,0 +1,14 @@
+{% extends "layouts/base.html" %}
+{% from "components/button.html" import button %}
+{% block content %}
+<h1 class="text-2xl font-semibold">Источники</h1>
+<form class="mt-6 flex flex-wrap gap-2" method="post" action="/ui/actions/sources" hx-post="/ui/actions/sources" hx-target="#sources-results" hx-swap="innerHTML" hx-indicator="#sources-loading">
+  <label class="sr-only" for="identifier">Username или ID</label>
+  <input class="rounded border border-slate-300 px-3 py-2" id="identifier" name="identifier" placeholder="@username или ID" required>
+  {{ button('Добавить') }}
+</form>
+<p id="sources-loading" class="htmx-indicator mt-2 text-sm text-slate-500">Сохранение…</p>
+<section id="sources-results" class="mt-6">
+  {% include "partials/sources_table.html" %}
+</section>
+{% endblock %}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 
-from app.config import Settings
+from app.core.config import Settings
 
 
 def configure_logging(config: Settings) -> None:

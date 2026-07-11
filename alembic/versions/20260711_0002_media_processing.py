@@ -22,7 +22,9 @@ def upgrade() -> None:
         sa.Column("height", sa.Integer(), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=True),
         sa.Column("sha256", sa.String(length=64), nullable=True),
-        sa.Column("processing_status", sa.String(length=32), nullable=False, server_default="pending"),
+        sa.Column(
+            "processing_status", sa.String(length=32), nullable=False, server_default="pending"
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["message_id"], ["telegram_messages.id"]),
@@ -47,9 +49,13 @@ def upgrade() -> None:
         sa.UniqueConstraint("media_file_id", name="uq_media_processing_jobs_media_file_id"),
     )
     op.create_index("ix_media_processing_jobs_message_id", "media_processing_jobs", ["message_id"])
-    op.create_index("ix_media_processing_jobs_media_file_id", "media_processing_jobs", ["media_file_id"])
+    op.create_index(
+        "ix_media_processing_jobs_media_file_id", "media_processing_jobs", ["media_file_id"]
+    )
     op.create_index("ix_media_processing_jobs_status", "media_processing_jobs", ["status"])
-    op.create_index("ix_media_processing_jobs_next_retry_at", "media_processing_jobs", ["next_retry_at"])
+    op.create_index(
+        "ix_media_processing_jobs_next_retry_at", "media_processing_jobs", ["next_retry_at"]
+    )
     op.create_table(
         "plate_detections",
         sa.Column("id", sa.Integer(), primary_key=True),

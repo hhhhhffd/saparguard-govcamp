@@ -25,6 +25,9 @@ fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip postgresql postgresql-contrib rsync curl openssl
 
+PYTHON_BIN="$(command -v python3.12 || true)"
+[[ -n "${PYTHON_BIN}" ]] || fail "Python 3.12 is required. Install python3.12 and python3.12-venv, then rerun."
+
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "/var/lib/${SERVICE_NAME}" --shell /usr/sbin/nologin "${SERVICE_USER}"
 fi
@@ -45,6 +48,15 @@ if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
 fi
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 
+note "Checking prebuilt frontend assets"
+for asset in \
+  "app/web/static/css/app.css" \
+  "app/web/static/js/app.js" \
+  "app/web/static/vendor/htmx.min.js" \
+  "app/web/static/vendor/alpine-csp.min.js"; do
+  [[ -f "${INSTALL_DIR}/${asset}" ]] || fail "Missing prebuilt frontend asset: ${asset}. Run scripts/prepare_deploy.sh before uploading the bundle."
+done
+
 note "Configuring PostgreSQL without removing existing data"
 systemctl enable --now postgresql
 for _ in {1..15}; do pg_isready -q && break; sleep 1; done
@@ -64,7 +76,7 @@ else
 fi
 
 note "Creating Python environment and installing dependencies"
-sudo -u "${SERVICE_USER}" python3 -m venv "${INSTALL_DIR}/.venv"
+sudo -u "${SERVICE_USER}" "${PYTHON_BIN}" -m venv "${INSTALL_DIR}/.venv"
 sudo -u "${SERVICE_USER}" "${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip
 sudo -u "${SERVICE_USER}" "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
 

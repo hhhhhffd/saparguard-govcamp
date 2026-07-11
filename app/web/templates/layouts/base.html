@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SaparGuard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/vendor/alpine-csp.min.js" defer></script>
+    <script src="/static/js/app.js" type="module"></script>
+  </head>
+  <body>
+    <header class="border-b border-slate-800 bg-slate-950 px-6 py-4 text-slate-100">
+      <div class="mx-auto flex max-w-7xl items-center gap-8">
+        <a class="font-semibold" href="/">SaparGuard</a>
+        <nav class="flex gap-4 text-sm">
+          <a href="/sources">Источники</a>
+          <a href="/messages">Сообщения</a>
+          <a href="/docs">API</a>
+        </nav>
+      </div>
+    </header>
+    <main class="mx-auto max-w-7xl px-6 py-8">
+      <div id="ui-error" class="mb-4 hidden rounded border border-red-300 bg-red-50 p-3 text-red-800" role="alert"></div>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

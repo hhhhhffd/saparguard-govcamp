@@ -45,10 +45,13 @@ class MessageRepository:
         statement = insert(TelegramMessage).values(**values)
         statement = statement.on_conflict_do_update(
             constraint="uq_telegram_messages_telegram_chat_id",
-            set_={key: statement.excluded[key] for key in values if key not in {"telegram_chat_id", "telegram_message_id", "saved_at"}},
+            set_={
+                key: statement.excluded[key]
+                for key in values
+                if key not in {"telegram_chat_id", "telegram_message_id", "saved_at"}
+            },
         ).returning(TelegramMessage)
         message = (await self._session.execute(statement)).scalar_one()
-        await self._session.commit()
         return message
 
     async def mark_deleted(self, telegram_chat_id: int, message_ids: list[int]) -> int:
@@ -60,7 +63,6 @@ class MessageRepository:
             )
             .values(is_deleted=True, deleted_at=datetime.now(timezone.utc))
         )
-        await self._session.commit()
         return result.rowcount or 0
 
     async def get(self, message_id: int) -> TelegramMessage | None:
@@ -103,7 +105,10 @@ class MessageRepository:
         if cursor_sent_at is not None and cursor_id is not None:
             filters.append(
                 (TelegramMessage.published_at < cursor_sent_at)
-                | ((TelegramMessage.published_at == cursor_sent_at) & (TelegramMessage.id < cursor_id))
+                | (
+                    (TelegramMessage.published_at == cursor_sent_at)
+                    & (TelegramMessage.id < cursor_id)
+                )
             )
         where_clause = and_(*filters) if filters else True
         result = await self._session.execute(

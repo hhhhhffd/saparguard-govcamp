@@ -1,0 +1,13 @@
+{% extends "layouts/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold">Состояние сборщика</h1>
+<div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+  {% for key, value in stats.items() %}
+  <article class="rounded border border-slate-200 bg-white p-4 shadow-sm">
+    <small class="text-slate-500">{{ key }}</small>
+    <strong class="mt-1 block text-xl">{{ value if value is not none else '—' }}</strong>
+  </article>
+  {% endfor %}
+</div>
+<p class="mt-6 text-sm text-slate-500">Время отображается в часовом поясе {{ display_timezone }}.</p>
+{% endblock %}

@@ -1,0 +1,3 @@
+{% macro button(label, type="submit", variant="primary") -%}
+<button type="{{ type }}" class="rounded px-3 py-2 text-sm font-medium {{ 'bg-slate-900 text-white' if variant == 'primary' else 'border border-slate-300 bg-white text-slate-900' }}">{{ label }}</button>
+{%- endmacro %}

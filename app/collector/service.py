@@ -8,10 +8,10 @@ from telethon.errors import FloodWaitError
 
 from app.collector.client import authorize_client, build_client
 from app.collector.handlers import handle_deleted_message, handle_edited_message, handle_new_message
-from app.collector.media_worker import run_media_worker
+from app.core.config import settings
+from app.core.logging import configure_logging
+from app.processing.media.worker import run_media_worker
 from app.collector.sync import synchronize_configured_sources
-from app.config import settings
-from app.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 

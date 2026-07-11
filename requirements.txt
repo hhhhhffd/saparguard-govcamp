@@ -6,8 +6,8 @@ greenlet==3.2.4
 Jinja2==3.1.6
 pydantic-settings==2.10.1
 Pillow==11.3.0
+python-multipart==0.0.20
 SQLAlchemy==2.0.43
 Telethon==1.40.0
 uvicorn[standard]==0.35.0
-pytest==8.4.2
 qrcode==8.2

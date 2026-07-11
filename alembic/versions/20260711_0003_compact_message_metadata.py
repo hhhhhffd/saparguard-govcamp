@@ -10,8 +10,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("telegram_messages", sa.Column("forward_source_id", sa.BigInteger(), nullable=True))
-    op.add_column("telegram_messages", sa.Column("forward_source_name", sa.String(length=512), nullable=True))
+    op.add_column(
+        "telegram_messages", sa.Column("forward_source_id", sa.BigInteger(), nullable=True)
+    )
+    op.add_column(
+        "telegram_messages", sa.Column("forward_source_name", sa.String(length=512), nullable=True)
+    )
     op.drop_column("telegram_messages", "raw_data")
     op.drop_column("telegram_messages", "reply_to_message_id")
     op.drop_column("telegram_messages", "forward_source")
@@ -33,7 +37,9 @@ def downgrade() -> None:
     op.add_column("telegram_messages", sa.Column("views", sa.Integer(), nullable=True))
     op.add_column("telegram_messages", sa.Column("has_media", sa.Boolean(), nullable=True))
     op.add_column("telegram_messages", sa.Column("forward_source", sa.JSON(), nullable=True))
-    op.add_column("telegram_messages", sa.Column("reply_to_message_id", sa.Integer(), nullable=True))
+    op.add_column(
+        "telegram_messages", sa.Column("reply_to_message_id", sa.Integer(), nullable=True)
+    )
     op.add_column("telegram_messages", sa.Column("raw_data", sa.JSON(), nullable=True))
     op.drop_column("telegram_messages", "forward_source_name")
     op.drop_column("telegram_messages", "forward_source_id")

@@ -11,4 +11,8 @@ __pycache__/
 venv/
 logs/
 deploy/
+web-assets/node_modules/
+app/web/static/css/
+app/web/static/js/
+app/web/static/vendor/
 !.gitkeep

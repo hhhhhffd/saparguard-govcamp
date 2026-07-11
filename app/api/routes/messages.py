@@ -24,7 +24,9 @@ from app.schemas.messages import (
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
-def serialize_message(message: TelegramMessage, include_details: bool = False) -> MessageRead | MessageDetailRead:
+def serialize_message(
+    message: TelegramMessage, include_details: bool = False
+) -> MessageRead | MessageDetailRead:
     data: dict[str, Any] = {
         "id": message.id,
         "telegram_message_id": message.telegram_message_id,
@@ -98,7 +100,9 @@ async def list_messages(
     session: AsyncSession = Depends(get_session),
 ) -> MessagePage:
     if (cursor_sent_at is None) != (cursor_id is None):
-        raise HTTPException(status_code=422, detail="cursor_sent_at and cursor_id must be supplied together")
+        raise HTTPException(
+            status_code=422, detail="cursor_sent_at and cursor_id must be supplied together"
+        )
     messages, has_more = await MessageRepository(session).list(
         limit=limit,
         cursor_sent_at=cursor_sent_at,
@@ -114,11 +118,17 @@ async def list_messages(
         if messages and has_more
         else None
     )
-    return MessagePage(items=[serialize_message(item) for item in messages], next_cursor=next_cursor, has_more=has_more)
+    return MessagePage(
+        items=[serialize_message(item) for item in messages],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.get("/{message_id}", response_model=MessageDetailRead)
-async def get_message(message_id: int, session: AsyncSession = Depends(get_session)) -> MessageDetailRead:
+async def get_message(
+    message_id: int, session: AsyncSession = Depends(get_session)
+) -> MessageDetailRead:
     message = await MessageRepository(session).get(message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")

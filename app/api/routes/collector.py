@@ -12,7 +12,13 @@ router = APIRouter(prefix="/collector", tags=["collector"])
 
 @router.get("/status")
 async def collector_status(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
-    states = list((await session.scalars(select(CollectorState).order_by(desc(CollectorState.last_synced_at)).limit(20))))
+    states = list(
+        (
+            await session.scalars(
+                select(CollectorState).order_by(desc(CollectorState.last_synced_at)).limit(20)
+            )
+        )
+    )
     errors = list(
         (
             await session.execute(
@@ -36,6 +42,7 @@ async def collector_status(session: AsyncSession = Depends(get_session)) -> dict
             for item in states
         ],
         "errors": [
-            {"title": row.title, "username": row.username, "error": row.last_error} for row in errors
+            {"title": row.title, "username": row.username, "error": row.last_error}
+            for row in errors
         ],
     }

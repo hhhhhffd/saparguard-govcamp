@@ -11,7 +11,9 @@ def test_message_values_keeps_only_compact_forward_metadata() -> None:
         sender_id=11,
         message="text",
         date=None,
-        fwd_from=SimpleNamespace(from_id=types.PeerUser(99), from_name="Forwarded sender", post_author=None),
+        fwd_from=SimpleNamespace(
+            from_id=types.PeerUser(99), from_name="Forwarded sender", post_author=None
+        ),
         media=None,
         edit_date=None,
     )

@@ -6,6 +6,17 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="${1:-${ROOT_DIR}/deploy}"
 STAGING_DIR="${DEPLOY_DIR}.staging.$$"
 
+if ! command -v corepack >/dev/null 2>&1; then
+  echo "ERROR: Corepack (Node.js) is required to build frontend assets before deployment." >&2
+  exit 1
+fi
+
+(
+  cd "${ROOT_DIR}/web-assets"
+  corepack pnpm install --frozen-lockfile
+  corepack pnpm build
+)
+
 cleanup() { rm -rf "${STAGING_DIR}"; }
 trap cleanup EXIT
 

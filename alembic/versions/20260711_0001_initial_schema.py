@@ -67,10 +67,16 @@ def upgrade() -> None:
         sa.Column("raw_data", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(["telegram_chat_id"], ["telegram_chats.telegram_chat_id"]),
         sa.ForeignKeyConstraint(["telegram_sender_id"], ["telegram_users.telegram_user_id"]),
-        sa.UniqueConstraint("telegram_chat_id", "telegram_message_id", name="uq_telegram_messages_telegram_chat_id"),
+        sa.UniqueConstraint(
+            "telegram_chat_id", "telegram_message_id", name="uq_telegram_messages_telegram_chat_id"
+        ),
     )
-    op.create_index("ix_telegram_messages_telegram_chat_id", "telegram_messages", ["telegram_chat_id"])
-    op.create_index("ix_telegram_messages_telegram_sender_id", "telegram_messages", ["telegram_sender_id"])
+    op.create_index(
+        "ix_telegram_messages_telegram_chat_id", "telegram_messages", ["telegram_chat_id"]
+    )
+    op.create_index(
+        "ix_telegram_messages_telegram_sender_id", "telegram_messages", ["telegram_sender_id"]
+    )
     op.create_index("ix_telegram_messages_published_at", "telegram_messages", ["published_at"])
     op.create_index("ix_telegram_messages_is_deleted", "telegram_messages", ["is_deleted"])
     op.create_table(

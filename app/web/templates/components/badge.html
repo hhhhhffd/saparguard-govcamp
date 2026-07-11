@@ -1,0 +1,3 @@
+{% macro badge(label, tone="neutral") -%}
+<span class="rounded px-2 py-1 text-xs {{ 'bg-emerald-100 text-emerald-800' if tone == 'success' else 'bg-slate-100 text-slate-700' }}">{{ label }}</span>
+{%- endmacro %}
