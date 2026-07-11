@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saparguard
+      POSTGRES_PASSWORD: saparguard
+      POSTGRES_DB: saparguard
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saparguard -d saparguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  migrate:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://saparguard:saparguard@postgres:5432/saparguard
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://saparguard:saparguard@postgres:5432/saparguard
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - telethon_data:/app/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  collector:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://saparguard:saparguard@postgres:5432/saparguard
+    command: python -m app.collector.service
+    volumes:
+      - .:/app
+      - telethon_data:/app/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  telethon_data:

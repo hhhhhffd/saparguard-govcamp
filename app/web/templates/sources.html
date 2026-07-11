@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block content %}
+<h1>Источники</h1><form id="add-source"><input name="username" placeholder="@username или ID" required><button>Добавить</button></form><table><thead><tr><th>Название</th><th>Username / ID</th><th>Тип</th><th>Статус</th><th>Сообщений</th><th>Ошибка</th><th>Действия</th></tr></thead><tbody id="sources"></tbody></table>
+<script>
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function load(){const xs=await fetch('/api/sources').then(r=>r.json());sources.innerHTML=xs.map(s=>`<tr><td>${esc(s.title)}</td><td>${esc(s.username||s.telegram_chat_id)}</td><td>${esc(s.chat_type)}</td><td>${s.is_active?'включён':'выключен'}</td><td>${s.message_count}</td><td>${esc(s.last_error)}</td><td><button onclick="action(${s.id},'${s.is_active?'disable':'enable'}')">${s.is_active?'Отключить':'Включить'}</button> <button onclick="action(${s.id},'history')">История</button></td></tr>`).join('')}
+async function action(id,name){await fetch(`/api/sources/${id}/${name}`,{method:'POST'});load()}
+document.querySelector('#add-source').onsubmit=async e=>{e.preventDefault();const v=e.target.username.value.trim();const body=/^-?\d+$/.test(v)?{telegram_chat_id:Number(v)}:{username:v.replace(/^@/,'')};const r=await fetch('/api/sources',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(!r.ok)alert(await r.text());else{e.target.reset();load()}};load();
+</script>{% endblock %}

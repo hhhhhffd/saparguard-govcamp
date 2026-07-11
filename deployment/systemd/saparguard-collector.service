@@ -1,0 +1,19 @@
+[Unit]
+Description=SaparGuard Telethon collector
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=saparguard
+Group=saparguard
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=__INSTALL_DIR__/.env
+ExecStart=__INSTALL_DIR__/.venv/bin/python -m app.collector.service
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

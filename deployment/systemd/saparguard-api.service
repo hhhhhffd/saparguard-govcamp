@@ -1,0 +1,19 @@
+[Unit]
+Description=SaparGuard FastAPI service
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=saparguard
+Group=saparguard
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=__INSTALL_DIR__/.env
+ExecStart=__INSTALL_DIR__/.venv/bin/uvicorn app.main:app --host ${API_HOST} --port ${API_PORT}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

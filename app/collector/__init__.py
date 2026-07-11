@@ -1,0 +1,1 @@
+"""Telethon collection service."""
