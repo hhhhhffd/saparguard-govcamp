@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import chats, collector, messages, stats
+from app.api.routes import chats, collector, media, messages, stats
 from app.config import settings
 from app.database.session import close_database, engine
 from app.logging import configure_logging
@@ -34,6 +34,7 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 app.include_router(web_router)
 app.include_router(chats.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
+app.include_router(media.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(collector.router, prefix="/api")
 

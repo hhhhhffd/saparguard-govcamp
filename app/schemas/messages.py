@@ -41,11 +41,6 @@ class MessageRead(BaseModel):
     sender: SenderRead | None
 
 
-class MessageDetailRead(MessageRead):
-    raw_data: dict[str, Any]
-    edits: list[MessageEditRead]
-
-
 class MessageEditRead(BaseModel):
     id: int
     previous_text: str | None
@@ -53,8 +48,34 @@ class MessageEditRead(BaseModel):
     detected_at: datetime
 
 
+class PlateDetectionRead(BaseModel):
+    raw_text: str
+    normalized_text: str
+    confidence: float | None
+
+
+class MediaFileRead(BaseModel):
+    id: int
+    mime_type: str | None
+    width: int | None
+    height: int | None
+    processing_status: str
+    last_error: str | None
+    plates: list[PlateDetectionRead]
+
+
+class MessageDetailRead(MessageRead):
+    raw_data: dict[str, Any]
+    edits: list[MessageEditRead]
+    media_files: list[MediaFileRead]
+
+
+class MessageCursor(BaseModel):
+    sent_at: datetime
+    id: int
+
+
 class MessagePage(BaseModel):
     items: list[MessageRead]
-    page: int
-    page_size: int
-    total: int
+    next_cursor: MessageCursor | None
+    has_more: bool

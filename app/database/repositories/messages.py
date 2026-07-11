@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import MessageEdit, TelegramMessage, TelegramUser
+from app.database.models import MediaFile, MessageEdit, TelegramMessage, TelegramUser
 
 
 class MessageRepository:
@@ -67,7 +67,13 @@ class MessageRepository:
     async def get(self, message_id: int) -> TelegramMessage | None:
         result = await self._session.execute(
             select(TelegramMessage)
-            .options(selectinload(TelegramMessage.chat), selectinload(TelegramMessage.sender), selectinload(TelegramMessage.edits))
+            .options(
+                selectinload(TelegramMessage.chat),
+                selectinload(TelegramMessage.sender),
+                selectinload(TelegramMessage.edits),
+                selectinload(TelegramMessage.media_files).selectinload(MediaFile.jobs),
+                selectinload(TelegramMessage.media_files).selectinload(MediaFile.plate_detections),
+            )
             .where(TelegramMessage.id == message_id)
         )
         return result.scalar_one_or_none()
@@ -75,8 +81,9 @@ class MessageRepository:
     async def list(
         self,
         *,
-        page: int,
-        page_size: int,
+        limit: int,
+        cursor_sent_at: datetime | None,
+        cursor_id: int | None,
         query: str | None,
         chat_id: int | None,
         sender_id: int | None,
@@ -97,14 +104,18 @@ class MessageRepository:
             filters.append(TelegramMessage.published_at <= date_to)
         if has_media is not None:
             filters.append(TelegramMessage.has_media.is_(has_media))
+        if cursor_sent_at is not None and cursor_id is not None:
+            filters.append(
+                (TelegramMessage.published_at < cursor_sent_at)
+                | ((TelegramMessage.published_at == cursor_sent_at) & (TelegramMessage.id < cursor_id))
+            )
         where_clause = and_(*filters) if filters else True
         result = await self._session.execute(
             select(TelegramMessage)
             .options(selectinload(TelegramMessage.chat), selectinload(TelegramMessage.sender))
             .where(where_clause)
             .order_by(TelegramMessage.published_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            .limit(limit + 1)
         )
-        total = await self._session.scalar(select(func.count(TelegramMessage.id)).where(where_clause))
-        return list(result.scalars()), total or 0
+        items = list(result.scalars())
+        return items[:limit], len(items) > limit

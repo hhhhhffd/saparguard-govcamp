@@ -2,6 +2,7 @@
 .DS_Store
 *.session
 *.session-journal
+data/
 __pycache__/
 *.py[cod]
 .pytest_cache/

@@ -9,7 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import TelegramMessage
 from app.database.repositories import MessageRepository
 from app.database.session import get_session
-from app.schemas.messages import ChatShortRead, MessageDetailRead, MessageEditRead, MessagePage, MessageRead, SenderRead
+from app.schemas.messages import (
+    ChatShortRead,
+    MessageCursor,
+    MessageDetailRead,
+    MessageEditRead,
+    MediaFileRead,
+    MessagePage,
+    PlateDetectionRead,
+    MessageRead,
+    SenderRead,
+)
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -60,14 +70,34 @@ def serialize_message(message: TelegramMessage, include_details: bool = False) -
             )
             for edit in message.edits
         ]
+        data["media_files"] = [
+            MediaFileRead(
+                id=media.id,
+                mime_type=media.mime_type,
+                width=media.width,
+                height=media.height,
+                processing_status=media.processing_status,
+                last_error=media.jobs[0].last_error if media.jobs else None,
+                plates=[
+                    PlateDetectionRead(
+                        raw_text=plate.raw_text,
+                        normalized_text=plate.normalized_text,
+                        confidence=plate.confidence,
+                    )
+                    for plate in media.plate_detections
+                ],
+            )
+            for media in message.media_files
+        ]
         return MessageDetailRead(**data)
     return MessageRead(**data)
 
 
 @router.get("", response_model=MessagePage)
 async def list_messages(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor_sent_at: datetime | None = None,
+    cursor_id: int | None = None,
     query: str | None = None,
     chat_id: int | None = None,
     sender_id: int | None = None,
@@ -76,9 +106,12 @@ async def list_messages(
     has_media: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> MessagePage:
-    messages, total = await MessageRepository(session).list(
-        page=page,
-        page_size=page_size,
+    if (cursor_sent_at is None) != (cursor_id is None):
+        raise HTTPException(status_code=422, detail="cursor_sent_at and cursor_id must be supplied together")
+    messages, has_more = await MessageRepository(session).list(
+        limit=limit,
+        cursor_sent_at=cursor_sent_at,
+        cursor_id=cursor_id,
         query=query,
         chat_id=chat_id,
         sender_id=sender_id,
@@ -86,7 +119,12 @@ async def list_messages(
         date_to=date_to,
         has_media=has_media,
     )
-    return MessagePage(items=[serialize_message(item) for item in messages], page=page, page_size=page_size, total=total)
+    next_cursor = (
+        MessageCursor(sent_at=messages[-1].published_at, id=messages[-1].id)
+        if messages and has_more
+        else None
+    )
+    return MessagePage(items=[serialize_message(item) for item in messages], next_cursor=next_cursor, has_more=has_more)
 
 
 @router.get("/{message_id}", response_model=MessageDetailRead)

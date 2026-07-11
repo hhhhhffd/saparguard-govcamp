@@ -8,6 +8,7 @@ from telethon.errors import FloodWaitError
 
 from app.collector.client import authorize_client, build_client
 from app.collector.handlers import handle_deleted_message, handle_edited_message, handle_new_message
+from app.collector.media_worker import run_media_worker
 from app.collector.sync import synchronize_configured_sources
 from app.config import settings
 from app.logging import configure_logging
@@ -28,9 +29,18 @@ async def run() -> None:
             await authorize_client(client, settings)
             logger.info("Collector connected to Telegram")
             await synchronize_configured_sources(client, synchronize_existing=True)
-            while await client.is_user_authorized():
-                await asyncio.sleep(settings.collector_reconnect_delay_seconds)
-                await synchronize_configured_sources(client, synchronize_existing=False)
+            worker_tasks = [
+                asyncio.create_task(run_media_worker(client), name=f"media-worker-{index}")
+                for index in range(settings.alpr_worker_count)
+            ]
+            try:
+                while await client.is_user_authorized():
+                    await asyncio.sleep(settings.collector_reconnect_delay_seconds)
+                    await synchronize_configured_sources(client, synchronize_existing=False)
+            finally:
+                for task in worker_tasks:
+                    task.cancel()
+                await asyncio.gather(*worker_tasks, return_exceptions=True)
         except FloodWaitError as exc:
             logger.warning("Telegram requested FloodWait: sleeping for %s seconds", exc.seconds)
             await asyncio.sleep(exc.seconds)

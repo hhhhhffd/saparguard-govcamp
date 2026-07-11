@@ -46,10 +46,15 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://saparguard:saparguard@postgres:5432/saparguard
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
+      OPENBLAS_NUM_THREADS: ${OPENBLAS_NUM_THREADS:-1}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-1}
+      MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
     command: python -m app.collector.service
     volumes:
       - .:/app
       - telethon_data:/app/data
+      - alpr_cache:/root/.cache
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -57,3 +62,4 @@ services:
 volumes:
   postgres_data:
   telethon_data:
+  alpr_cache:

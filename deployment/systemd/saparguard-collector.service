@@ -9,6 +9,10 @@ User=saparguard
 Group=saparguard
 WorkingDirectory=__INSTALL_DIR__
 EnvironmentFile=__INSTALL_DIR__/.env
+Environment=OMP_NUM_THREADS=2
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=__INSTALL_DIR__/.venv/bin/python -m app.collector.service
 Restart=always
 RestartSec=10

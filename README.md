@@ -12,6 +12,8 @@
 - новые, отредактированные и удалённые сообщения;
 - UPSERT по `(telegram_chat_id, telegram_message_id)`;
 - исходные доступные Telethon-метаданные в `JSONB`;
+- сохранение Telegram-фото и изображений-документов в сжатом JPEG;
+- постоянная PostgreSQL-очередь обработки медиа и распознавание номерных знаков FastALPR;
 - мягкое удаление источника: сообщения остаются в БД;
 - API, UI, Docker Compose, Alembic и systemd-установка.
 
@@ -24,6 +26,8 @@ docker compose up --build
 ```
 
 Откройте `http://localhost:8000`. Добавьте источник через страницу «Источники». При первом запуске collector Telethon запросит авторизацию в интерактивном терминале; после неё session-файл будет храниться в Docker volume `telethon_data`.
+
+История ограничена `COLLECTOR_HISTORY_DAYS=7`: старые сообщения, изображения и задачи распознавания не сохраняются. Уже сохранённые записи автоматически не удаляются. Интерфейс использует `DISPLAY_TIMEZONE` и показывает даты как `HH.mm.ss DD.MM.YYYY`; API продолжает возвращать ISO 8601 UTC timestamps.
 
 ## Локальный запуск без Docker
 
@@ -45,8 +49,9 @@ cp .env.example .env
 - `GET/POST /api/sources` — список и добавление источников;
 - `POST /api/sources/{id}/enable`, `/disable`, `/history` — управление источником и историей;
 - `DELETE /api/sources/{id}` — убрать источник из конфигурации, не затрагивая сообщения;
-- `GET /api/messages` — поиск, фильтры, пагинация;
+- `GET /api/messages` — cursor/keyset-пагинация, поиск и фильтры для интеграций;
 - `GET /api/messages/{id}` — полная карточка и `raw_data`;
+- `GET /api/media/{id}` — сжатое сохранённое изображение без раскрытия пути на сервере;
 - `GET /api/stats`, `GET /api/collector/status` — состояние и ошибки.
 
 ## Числовые Telegram ID
@@ -83,6 +88,12 @@ systemctl status saparguard-api.service saparguard-collector.service
 Если Telegram не доставляет код на телефон, установите `TELEGRAM_AUTH_MODE=qr` и запустите collector в интерактивном терминале. Он отобразит QR; сканируйте его в Telegram через «Настройки → Устройства → Подключить устройство». При включённой 2FA терминал дополнительно запросит пароль. QR-токен не пишется в логи и действует недолго.
 
 Логи: `journalctl -u saparguard-api -f`, `journalctl -u saparguard-collector -f` и файл из `LOG_PATH`. Файловый лог автоматически ротируется.
+
+## Фото и номера
+
+Collector создаёт постоянное задание PostgreSQL для каждого `message.photo` и документа с MIME-типом `image/*`. Один media worker внутри collector скачивает файл только перед обработкой, исправляет EXIF-ориентацию, удаляет метаданные, сжимает до JPEG (max 1600px) и сохраняет по SHA-256 в `data/media/`. Затем один лениво созданный FastALPR instance запускает CPU-распознавание. Ошибки повторяются согласно `MEDIA_JOB_MAX_ATTEMPTS`, после чего фиксируются как `failed`; они не останавливают collector.
+
+На VPS с 1 ГБ RAM сохраняйте `ALPR_WORKER_COUNT=1`, `API_WORKER_COUNT=1` и лимиты потоков из `.env.example`. FastALPR при первой обработке может скачать модели, поэтому collector должен иметь исходящий доступ к интернету в этот момент.
 
 ## Проверка
 
