@@ -8,3 +8,4 @@ SQLAlchemy==2.0.43
 Telethon==1.40.0
 uvicorn[standard]==0.35.0
 pytest==8.4.2
+qrcode==8.2

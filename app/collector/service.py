@@ -6,7 +6,7 @@ import logging
 from telethon import events
 from telethon.errors import FloodWaitError
 
-from app.collector.client import build_client
+from app.collector.client import authorize_client, build_client
 from app.collector.handlers import handle_deleted_message, handle_edited_message, handle_new_message
 from app.collector.sync import synchronize_configured_sources
 from app.config import settings
@@ -25,7 +25,7 @@ async def run() -> None:
     while True:
         try:
             logger.info("Connecting collector to Telegram")
-            await client.start()
+            await authorize_client(client, settings)
             logger.info("Collector connected to Telegram")
             await synchronize_configured_sources(client, synchronize_existing=True)
             while await client.is_user_authorized():

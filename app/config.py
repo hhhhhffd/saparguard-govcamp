@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +16,9 @@ class Settings(BaseSettings):
     telegram_api_hash: str | None = Field(default=None, validation_alias="TELEGRAM_API_HASH")
     telegram_session_path: Path = Field(
         default=Path("./data/telethon.session"), validation_alias="TELEGRAM_SESSION_PATH"
+    )
+    telegram_auth_mode: Literal["phone", "qr"] = Field(
+        default="phone", validation_alias="TELEGRAM_AUTH_MODE"
     )
     database_url: PostgresDsn = Field(validation_alias="DATABASE_URL")
     api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")

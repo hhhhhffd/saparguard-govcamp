@@ -80,6 +80,8 @@ sudo systemctl enable --now saparguard-collector.service
 systemctl status saparguard-api.service saparguard-collector.service
 ```
 
+Если Telegram не доставляет код на телефон, установите `TELEGRAM_AUTH_MODE=qr` и запустите collector в интерактивном терминале. Он отобразит QR; сканируйте его в Telegram через «Настройки → Устройства → Подключить устройство». При включённой 2FA терминал дополнительно запросит пароль. QR-токен не пишется в логи и действует недолго.
+
 Логи: `journalctl -u saparguard-api -f`, `journalctl -u saparguard-collector -f` и файл из `LOG_PATH`. Файловый лог автоматически ротируется.
 
 ## Проверка
