@@ -1,20 +1,33 @@
 {% for message in messages %}
+  {% set displayed_at = message.published_at|display_datetime %}
+  {% set chat_name = message.chat.title or message.telegram_chat_id %}
+  {% set sender_name = message.sender.username if message.sender and message.sender.username else '—' %}
+  {% set message_text = message.text or '—' %}
+  {% set media_type = message.media_type or '—' %}
+  {% if message.is_deleted %}
+    {% set status = 'удалено' %}
+  {% elif message.edited_at %}
+    {% set status = 'изменено' %}
+  {% else %}
+    {% set status = '—' %}
+  {% endif %}
   <tr class="border-b last:border-0">
-    <td class="p-3">{{ message.published_at|display_datetime }}</td>
-    <td class="p-3">{{ message.chat.title or message.telegram_chat_id }}</td>
-    <td class="p-3">{{ message.sender.username if message.sender and message.sender.username else '—' }}</td>
-    <td class="p-3 whitespace-pre-wrap break-words">{{ message.text or '—' }}</td>
-    <td class="p-3">{{ message.media_type or '—' }}</td>
+    <td class="truncate p-3" title="{{ displayed_at }}">{{ displayed_at }}</td>
+    <td class="truncate p-3" title="{{ chat_name }}">{{ chat_name }}</td>
+    <td class="truncate p-3" title="{{ sender_name }}">{{ sender_name }}</td>
+    <td class="truncate p-3" title="{{ message_text }}">{{ message_text }}</td>
+    <td class="truncate p-3" title="{{ media_type }}">{{ media_type }}</td>
     <td class="p-3">
-      {% if message.is_deleted %}удалено{% elif message.edited_at %}изменено{% else %}—{% endif %}
-      <button
-        type="button"
-        class="ml-2 underline"
-        hx-get="/ui/fragments/messages/{{ message.id }}"
-        hx-target="#message-detail"
-        hx-swap="innerHTML"
-        aria-controls="message-detail"
-      >Детали</button>
+      <div class="flex items-center gap-2">
+        <span class="truncate" title="{{ status }}">{{ status }}</span>
+        <button
+          type="button"
+          class="shrink-0 underline"
+          data-message-detail-url="/api/messages/{{ message.id }}"
+          aria-controls="message-detail-dialog"
+          aria-haspopup="dialog"
+        >Детали</button>
+      </div>
     </td>
   </tr>
 {% endfor %}

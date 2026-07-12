@@ -191,6 +191,29 @@ def test_message_rows_use_infinite_scroll() -> None:
     assert "append=true" in rendered
 
 
+def test_messages_table_uses_equal_width_columns_and_truncates_content() -> None:
+    message = SimpleNamespace(
+        id=1,
+        published_at=datetime.now(timezone.utc),
+        chat=SimpleNamespace(title="chat"),
+        telegram_chat_id=-100123,
+        sender=None,
+        text="message",
+        media_type=None,
+        is_deleted=False,
+        edited_at=None,
+    )
+
+    rendered = templates.get_template("partials/messages_table.html").render(
+        messages=[message], has_more=False
+    )
+
+    assert "table-fixed" in rendered
+    assert rendered.count('class="w-1/6"') == 6
+    assert "truncate" in rendered
+    assert 'data-message-detail-url="/api/messages/1"' in rendered
+
+
 @pytest.mark.asyncio
 async def test_messages_fragment_pushes_a_full_page_url(monkeypatch: pytest.MonkeyPatch) -> None:
     context = {
