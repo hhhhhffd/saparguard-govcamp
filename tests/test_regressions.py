@@ -167,7 +167,28 @@ def test_display_datetime_uses_configured_timezone(monkeypatch: pytest.MonkeyPat
 
     result = templating.format_display_datetime(datetime(2026, 7, 12, 8, 5, 3, tzinfo=timezone.utc))
 
-    assert result == "08.05.03 12.07.2026"
+    assert result == "08:05:03 12.07.2026"
+
+
+def test_message_rows_use_infinite_scroll() -> None:
+    message = SimpleNamespace(
+        id=1,
+        published_at=datetime.now(timezone.utc),
+        chat=SimpleNamespace(title="chat"),
+        telegram_chat_id=-100123,
+        sender=None,
+        text="message",
+        media_type=None,
+        is_deleted=False,
+        edited_at=None,
+    )
+
+    rendered = templates.get_template("partials/message_rows.html").render(
+        messages=[message], has_more=True, next_page_query="limit=50&cursor_id=1"
+    )
+
+    assert 'hx-trigger="revealed once"' in rendered
+    assert "append=true" in rendered
 
 
 @pytest.mark.asyncio
@@ -186,6 +207,26 @@ async def test_messages_fragment_pushes_a_full_page_url(monkeypatch: pytest.Monk
     response = await fragments.messages_table(request, query="taxi", session=MagicMock())
 
     assert response.headers["HX-Push-Url"] == "/messages?limit=50&query=taxi"
+
+
+@pytest.mark.asyncio
+async def test_messages_append_fragment_does_not_push_page_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = {
+        "messages": [],
+        "has_more": False,
+        "next_cursor": None,
+        "filters": {"limit": 50},
+        "next_page_query": "limit=50",
+        "page_url": "/messages?limit=50",
+    }
+    monkeypatch.setattr(fragments, "message_page_context", AsyncMock(return_value=context))
+    request = Request({"type": "http", "method": "GET", "path": "/ui/fragments/messages"})
+
+    response = await fragments.messages_table(request, append=True, session=MagicMock())
+
+    assert "HX-Push-Url" not in response.headers
 
 
 def test_image_processing_uses_unique_temporary_paths(

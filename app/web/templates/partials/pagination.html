@@ -1,3 +1,11 @@
-<nav class="mt-4">
-  <a class="rounded border border-slate-300 px-3 py-2 text-sm" href="/messages?{{ next_page_query }}" hx-get="/ui/fragments/messages?{{ next_page_query }}" hx-target="#messages-results" hx-swap="innerHTML">Следующая страница</a>
-</nav>
+<tr
+  id="messages-load-more"
+  hx-get="/ui/fragments/messages?{{ next_page_query }}&amp;append=true"
+  hx-trigger="revealed once"
+  hx-swap="outerHTML"
+  hx-indicator="#messages-loading"
+>
+  <td colspan="6" class="p-4 text-center text-sm text-slate-500">
+    Загружаем ещё сообщения…
+  </td>
+</tr>

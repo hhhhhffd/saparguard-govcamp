@@ -16,7 +16,7 @@ def format_display_datetime(value: datetime | None) -> str:
         return "—"
     if value.tzinfo is None:
         raise ValueError("Display datetime must be timezone-aware")
-    return value.astimezone(ZoneInfo(settings.display_timezone)).strftime("%H.%M.%S %d.%m.%Y")
+    return value.astimezone(ZoneInfo(settings.display_timezone)).strftime("%H:%M:%S %d.%m.%Y")
 
 
 templates.env.filters["display_datetime"] = format_display_datetime

@@ -19,6 +19,7 @@ router = APIRouter(prefix="/ui/fragments")
 async def messages_table(
     request: Request,
     limit: int = DEFAULT_PAGE_SIZE,
+    append: bool = False,
     cursor_sent_at: datetime | None = None,
     cursor_id: int | None = None,
     query: str | None = None,
@@ -41,8 +42,10 @@ async def messages_table(
     )
     context["request"] = request
     context["display_timezone"] = settings.display_timezone
-    response = templates.TemplateResponse(request, "partials/messages_table.html", context)
-    response.headers["HX-Push-Url"] = str(context["page_url"])
+    template_name = "partials/message_rows.html" if append else "partials/messages_table.html"
+    response = templates.TemplateResponse(request, template_name, context)
+    if not append:
+        response.headers["HX-Push-Url"] = str(context["page_url"])
     return response
 
 
