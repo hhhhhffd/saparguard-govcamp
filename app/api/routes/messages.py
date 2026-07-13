@@ -11,6 +11,8 @@ from app.database.repositories import MessageRepository
 from app.database.session import get_session
 from app.schemas.messages import (
     ChatShortRead,
+    AnalysisSummaryRead,
+    ExtractedEntityRead,
     MessageCursor,
     MessageDetailRead,
     MessageEditRead,
@@ -18,6 +20,7 @@ from app.schemas.messages import (
     MessagePage,
     PlateDetectionRead,
     MessageRead,
+    RouteRead,
     SenderRead,
 )
 
@@ -56,8 +59,17 @@ def serialize_message(
             if message.sender
             else None
         ),
+        "analysis": AnalysisSummaryRead(
+            status=message.analysis_job.status if message.analysis_job else None,
+            message_type=message.analysis.message_type if message.analysis else None,
+            classification_confidence=message.analysis.classification_confidence
+            if message.analysis
+            else None,
+        ),
     }
     if include_details:
+        analysis = message.analysis
+        entities = analysis.entities if analysis else []
         data["edits"] = [
             MessageEditRead(
                 id=edit.id,
@@ -83,6 +95,64 @@ def serialize_message(
             )
             for media in message.media_files
         ]
+        data["analysis_status"] = message.analysis_job.status if message.analysis_job else None
+        data["analyzer_version"] = (
+            analysis.analyzer_version
+            if analysis
+            else (message.analysis_job.analyzer_version if message.analysis_job else None)
+        )
+        data["analysis_error"] = message.analysis_job.last_error if message.analysis_job else None
+        data["attributes"] = analysis.attributes if analysis else {}
+        data["phones"] = [
+            ExtractedEntityRead(
+                entity_type=e.entity_type,
+                role=e.role,
+                raw_value=e.raw_value,
+                normalized_value=e.normalized_value,
+                confidence=e.confidence,
+                evidence=e.evidence,
+                metadata=e.metadata_,
+            )
+            for e in entities
+            if e.entity_type == "phone"
+        ]
+        data["vehicles"] = [
+            ExtractedEntityRead(
+                entity_type=e.entity_type,
+                role=e.role,
+                raw_value=e.raw_value,
+                normalized_value=e.normalized_value,
+                confidence=e.confidence,
+                evidence=e.evidence,
+                metadata=e.metadata_,
+            )
+            for e in entities
+            if e.entity_type == "vehicle"
+        ]
+        data["locations"] = [
+            ExtractedEntityRead(
+                entity_type=e.entity_type,
+                role=e.role,
+                raw_value=e.raw_value,
+                normalized_value=e.normalized_value,
+                confidence=e.confidence,
+                evidence=e.evidence,
+                metadata=e.metadata_,
+            )
+            for e in entities
+            if e.entity_type == "location"
+        ]
+        data["routes"] = [
+            RouteRead(
+                raw_origin=r.raw_origin,
+                normalized_origin=r.normalized_origin,
+                raw_destination=r.raw_destination,
+                normalized_destination=r.normalized_destination,
+                confidence=r.confidence,
+                evidence=r.evidence,
+            )
+            for r in (analysis.routes if analysis else [])
+        ]
         return MessageDetailRead(**data)
     return MessageRead(**data)
 
@@ -97,6 +167,9 @@ async def list_messages(
     sender_id: int | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    message_type: str | None = None,
+    entity_query: str | None = None,
+    analysis_status: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> MessagePage:
     if (cursor_sent_at is None) != (cursor_id is None):
@@ -112,6 +185,9 @@ async def list_messages(
         sender_id=sender_id,
         date_from=date_from,
         date_to=date_to,
+        message_type=message_type,
+        entity_query=entity_query,
+        analysis_status=analysis_status,
     )
     next_cursor = (
         MessageCursor(sent_at=messages[-1].published_at, id=messages[-1].id)

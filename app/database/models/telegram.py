@@ -19,6 +19,7 @@ from app.database.models.base import Base
 
 if TYPE_CHECKING:
     from app.database.models.media import MediaFile
+    from app.database.models.analysis import MessageAnalysis, MessageAnalysisJob
 
 
 class TelegramChat(Base):
@@ -91,6 +92,8 @@ class TelegramMessage(Base):
     sender: Mapped[TelegramUser | None] = relationship(back_populates="messages")
     edits: Mapped[list[MessageEdit]] = relationship(back_populates="message")
     media_files: Mapped[list["MediaFile"]] = relationship(back_populates="message")
+    analysis: Mapped["MessageAnalysis | None"] = relationship(back_populates="message")
+    analysis_job: Mapped["MessageAnalysisJob | None"] = relationship(back_populates="message")
 
 
 class MessageEdit(Base):

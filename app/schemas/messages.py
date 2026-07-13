@@ -33,6 +33,32 @@ class MessageRead(BaseModel):
     deleted_at: datetime | None
     chat: ChatShortRead
     sender: SenderRead | None
+    analysis: "AnalysisSummaryRead | None" = None
+
+
+class AnalysisSummaryRead(BaseModel):
+    status: str | None
+    message_type: str | None
+    classification_confidence: float | None
+
+
+class ExtractedEntityRead(BaseModel):
+    entity_type: str
+    role: str | None
+    raw_value: str
+    normalized_value: str
+    confidence: float
+    evidence: str
+    metadata: dict
+
+
+class RouteRead(BaseModel):
+    raw_origin: str
+    normalized_origin: str
+    raw_destination: str
+    normalized_destination: str
+    confidence: float
+    evidence: str
 
 
 class MessageEditRead(BaseModel):
@@ -58,6 +84,14 @@ class MediaFileRead(BaseModel):
 class MessageDetailRead(MessageRead):
     edits: list[MessageEditRead]
     media_files: list[MediaFileRead]
+    analysis_status: str | None
+    analyzer_version: str | None
+    analysis_error: str | None
+    attributes: dict
+    phones: list[ExtractedEntityRead]
+    vehicles: list[ExtractedEntityRead]
+    locations: list[ExtractedEntityRead]
+    routes: list[RouteRead]
 
 
 class MessageCursor(BaseModel):

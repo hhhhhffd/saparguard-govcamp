@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 from telethon import TelegramClient
@@ -11,6 +12,7 @@ from app.collector.serialization import entity_chat_id, message_values, user_val
 from app.database.repositories import (
     CollectorStateRepository,
     MediaJobRepository,
+    MessageAnalysisJobRepository,
     MessageRepository,
     SourceRepository,
 )
@@ -93,6 +95,10 @@ async def persist_message(
             await repository.upsert_user(sender_data)
         saved_message = await repository.upsert_message(
             message_values(message, telegram_chat_id), save_edit=edited
+        )
+        source_hash = hashlib.sha256((saved_message.text or "").encode("utf-8")).hexdigest()
+        await MessageAnalysisJobRepository(session).enqueue(
+            saved_message.id, source_hash, settings.text_analyzer_version
         )
         media = image_metadata(message)
         if media is not None:

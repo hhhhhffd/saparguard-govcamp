@@ -27,6 +27,9 @@ async def messages_table(
     sender_id: int | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    message_type: str | None = None,
+    entity_query: str | None = None,
+    analysis_status: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     context = await message_page_context(
@@ -38,6 +41,9 @@ async def messages_table(
         sender_id=sender_id,
         date_from=date_from,
         date_to=date_to,
+        message_type=message_type,
+        entity_query=entity_query,
+        analysis_status=analysis_status,
         session=session,
     )
     context["request"] = request

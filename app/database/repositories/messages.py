@@ -8,7 +8,15 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database.models import MediaFile, MessageEdit, TelegramMessage, TelegramUser
+from app.database.models import (
+    ExtractedEntity,
+    MediaFile,
+    MessageAnalysis,
+    MessageAnalysisJob,
+    MessageEdit,
+    TelegramMessage,
+    TelegramUser,
+)
 
 
 class MessageRepository:
@@ -74,6 +82,9 @@ class MessageRepository:
                 selectinload(TelegramMessage.edits),
                 selectinload(TelegramMessage.media_files).selectinload(MediaFile.jobs),
                 selectinload(TelegramMessage.media_files).selectinload(MediaFile.plate_detections),
+                selectinload(TelegramMessage.analysis).selectinload(MessageAnalysis.entities),
+                selectinload(TelegramMessage.analysis).selectinload(MessageAnalysis.routes),
+                selectinload(TelegramMessage.analysis_job),
             )
             .where(TelegramMessage.id == message_id)
         )
@@ -90,6 +101,9 @@ class MessageRepository:
         sender_id: int | None,
         date_from: datetime | None,
         date_to: datetime | None,
+        message_type: str | None = None,
+        entity_query: str | None = None,
+        analysis_status: str | None = None,
     ) -> tuple[list[TelegramMessage], int]:
         filters = []
         if query:
@@ -110,10 +124,31 @@ class MessageRepository:
                     & (TelegramMessage.id < cursor_id)
                 )
             )
+        if message_type:
+            filters.append(
+                TelegramMessage.analysis.has(MessageAnalysis.message_type == message_type)
+            )
+        if analysis_status:
+            filters.append(
+                TelegramMessage.analysis_job.has(MessageAnalysisJob.status == analysis_status)
+            )
+        if entity_query:
+            filters.append(
+                TelegramMessage.analysis.has(
+                    MessageAnalysis.entities.any(
+                        ExtractedEntity.normalized_value.ilike(f"%{entity_query}%")
+                    )
+                )
+            )
         where_clause = and_(*filters) if filters else True
         result = await self._session.execute(
             select(TelegramMessage)
-            .options(selectinload(TelegramMessage.chat), selectinload(TelegramMessage.sender))
+            .options(
+                selectinload(TelegramMessage.chat),
+                selectinload(TelegramMessage.sender),
+                selectinload(TelegramMessage.analysis),
+                selectinload(TelegramMessage.analysis_job),
+            )
             .where(where_clause)
             .order_by(TelegramMessage.published_at.desc())
             .limit(limit + 1)

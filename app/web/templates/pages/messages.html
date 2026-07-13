@@ -8,6 +8,8 @@
   <input class="rounded border border-slate-300 px-3 py-2" name="sender_id" value="{{ filters.sender_id }}" placeholder="Telegram sender ID">
   <input class="rounded border border-slate-300 px-3 py-2" name="date_from" value="{{ filters.date_from }}" placeholder="Дата от (ISO 8601)">
   <input class="rounded border border-slate-300 px-3 py-2" name="date_to" value="{{ filters.date_to }}" placeholder="Дата до (ISO 8601)">
+  <select class="rounded border border-slate-300 px-3 py-2" name="message_type"><option value="">Все типы</option>{% for kind in ['driver_offer','passenger_request','parcel_offer','parcel_request','service_message','commercial_spam','conversation','unknown'] %}<option value="{{ kind }}" {% if filters.message_type == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select>
+  <input class="rounded border border-slate-300 px-3 py-2" name="entity_query" value="{{ filters.entity_query }}" placeholder="Телефон, город или авто">
   <input type="hidden" name="limit" value="{{ filters.limit }}">
   {{ button('Применить') }}
 </form>

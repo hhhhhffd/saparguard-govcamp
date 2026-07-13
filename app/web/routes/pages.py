@@ -28,6 +28,9 @@ async def message_page_context(
     sender_id: int | None,
     date_from: datetime | None,
     date_to: datetime | None,
+    message_type: str | None = None,
+    entity_query: str | None = None,
+    analysis_status: str | None = None,
     session: AsyncSession,
 ) -> dict[str, object]:
     messages, has_more = await MessageRepository(session).list(
@@ -39,6 +42,9 @@ async def message_page_context(
         sender_id=sender_id,
         date_from=date_from,
         date_to=date_to,
+        message_type=message_type,
+        entity_query=entity_query,
+        analysis_status=analysis_status,
     )
     next_cursor = (
         {"cursor_sent_at": messages[-1].published_at.isoformat(), "cursor_id": messages[-1].id}
@@ -52,6 +58,9 @@ async def message_page_context(
         "sender_id": sender_id or "",
         "date_from": date_from.isoformat() if date_from else "",
         "date_to": date_to.isoformat() if date_to else "",
+        "message_type": message_type or "",
+        "entity_query": entity_query or "",
+        "analysis_status": analysis_status or "",
     }
     pagination_values = {key: value for key, value in filters.items() if value != ""}
     if next_cursor:
@@ -121,6 +130,9 @@ async def messages_page(
     sender_id: int | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
+    message_type: str | None = None,
+    entity_query: str | None = None,
+    analysis_status: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     context = await message_page_context(
@@ -132,6 +144,9 @@ async def messages_page(
         sender_id=sender_id,
         date_from=date_from,
         date_to=date_to,
+        message_type=message_type,
+        entity_query=entity_query,
+        analysis_status=analysis_status,
         session=session,
     )
     context["display_timezone"] = settings.display_timezone

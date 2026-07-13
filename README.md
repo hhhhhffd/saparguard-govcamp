@@ -1,6 +1,6 @@
 # SaparGuard
 
-SaparGuard сохраняет сырые сообщения выбранных Telegram-групп и каналов в PostgreSQL.
+SaparGuard сохраняет сообщения выбранных Telegram-групп и каналов в PostgreSQL и детерминированно извлекает тип объявления, телефоны, маршруты, локации и автомобили.
 Он обрабатывает изображения и распознаёт номера, но на текущем этапе **не** выполняет extraction,
 ML-анализ сообщений, risk scoring, граф связей, карту или продуктовый dashboard.
 
@@ -34,6 +34,10 @@ cp .env.example .env
 .venv/bin/uvicorn app.main:app --reload
 # в другом терминале
 .venv/bin/python -m app.collector.service
+# независимый worker, Telegram credentials/session не нужны
+.venv/bin/python -m app.processing.text.worker
+# поставить исторические сообщения в очередь
+.venv/bin/python -m app.processing.text.backfill --days 7
 ```
 
 Для разработки CSS в watch-режиме:
@@ -86,6 +90,10 @@ Telegram-текст отображается экранированным. Serve
 авторизованный `TelegramClient`. Будущее безопасное разделение: отдельный компонент Telegram media
 fetch сохраняет локальный input, а независимый local image processor получает только файл и job ID.
 До появления этой границы отдельный Docker/systemd media-worker сервис запрещён.
+
+## Text analysis
+
+Text analysis is an offline rule-based baseline: its results carry confidence and evidence, and it does not use LLMs or cloud services. The `analysis-worker` Docker service uses PostgreSQL only and has no Telethon volume. Run `python -m app.processing.text.backfill --days N [--limit N] [--force]` to queue stored messages.
 
 ## Checks
 

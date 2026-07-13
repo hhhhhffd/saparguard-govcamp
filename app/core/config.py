@@ -45,6 +45,21 @@ class Settings(BaseSettings):
     media_storage_path: Path = Field(
         default=Path("./data/media"), validation_alias="MEDIA_STORAGE_PATH"
     )
+    text_analysis_job_max_attempts: int = Field(
+        default=3, ge=1, validation_alias="TEXT_ANALYSIS_JOB_MAX_ATTEMPTS"
+    )
+    text_analysis_job_retry_delay_seconds: int = Field(
+        default=60, ge=1, validation_alias="TEXT_ANALYSIS_JOB_RETRY_DELAY_SECONDS"
+    )
+    text_analysis_job_stale_timeout_seconds: int = Field(
+        default=900, ge=1, validation_alias="TEXT_ANALYSIS_JOB_STALE_TIMEOUT_SECONDS"
+    )
+    text_analysis_poll_interval_seconds: int = Field(
+        default=2, ge=1, validation_alias="TEXT_ANALYSIS_POLL_INTERVAL_SECONDS"
+    )
+    text_analyzer_version: str = Field(
+        default="20260714.1", validation_alias="TEXT_ANALYZER_VERSION"
+    )
 
 
 settings = Settings()

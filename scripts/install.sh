@@ -86,8 +86,10 @@ sudo -u "${SERVICE_USER}" bash -c "cd '${INSTALL_DIR}' && .venv/bin/alembic upgr
 note "Installing systemd services"
 sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "${INSTALL_DIR}/deployment/systemd/saparguard-api.service" > /etc/systemd/system/saparguard-api.service
 sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "${INSTALL_DIR}/deployment/systemd/saparguard-collector.service" > /etc/systemd/system/saparguard-collector.service
+sed "s|__INSTALL_DIR__|${INSTALL_DIR}|g" "${INSTALL_DIR}/deployment/systemd/saparguard-analysis-worker.service" > /etc/systemd/system/saparguard-analysis-worker.service
 systemctl daemon-reload
 systemctl enable --now saparguard-api.service
+systemctl enable --now saparguard-analysis-worker.service
 
 sleep 2
 if ! curl --fail --silent "http://127.0.0.1:$(grep '^API_PORT=' "${INSTALL_DIR}/.env" | cut -d= -f2 || echo 8000)/health" >/dev/null; then
@@ -107,4 +109,5 @@ note "Installation report"
 printf 'API: %s\n' "$(systemctl is-active saparguard-api.service)"
 printf 'PostgreSQL: %s\n' "$(systemctl is-active postgresql.service)"
 printf 'Collector: %s\n' "$(systemctl is-active saparguard-collector.service || true)"
+printf 'Text analysis worker: %s\n' "$(systemctl is-active saparguard-analysis-worker.service || true)"
 printf '%s\n' "${REPORT[@]:-No warnings.}"

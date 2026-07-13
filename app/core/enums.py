@@ -22,3 +22,10 @@ class MediaProcessingStatus(StrEnum):
     COMPLETED = "completed"
     NO_PLATE_FOUND = "no_plate_found"
     FAILED = "failed"
+
+
+class TextAnalysisJobStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
