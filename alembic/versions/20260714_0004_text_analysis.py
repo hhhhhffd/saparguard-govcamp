@@ -30,6 +30,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True)),
         sa.Column("finished_at", sa.DateTime(timezone=True)),
         sa.Column("next_retry_at", sa.DateTime(timezone=True)),
+        sa.Column("lease_token", sa.String(36)),
     )
     op.create_index(
         "ix_message_analysis_jobs_pending",
@@ -51,6 +52,7 @@ def upgrade() -> None:
         sa.Column("source_text_hash", sa.String(64), nullable=False),
         sa.Column("analyzer_version", sa.String(64), nullable=False),
         sa.Column("attributes", postgresql.JSONB(), nullable=False),
+        sa.Column("classification_evidence", postgresql.JSONB(), nullable=False),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
@@ -77,6 +79,7 @@ def upgrade() -> None:
         "extracted_entities",
         ["entity_type", "normalized_value"],
     )
+    op.create_index("ix_extracted_entities_analysis_id", "extracted_entities", ["analysis_id"])
     op.create_table(
         "message_routes",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -91,10 +94,13 @@ def upgrade() -> None:
         sa.Column("evidence", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
+    op.create_index("ix_message_routes_analysis_id", "message_routes", ["analysis_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_message_routes_analysis_id", table_name="message_routes")
     op.drop_table("message_routes")
+    op.drop_index("ix_extracted_entities_analysis_id", table_name="extracted_entities")
     op.drop_index("ix_extracted_entities_type_normalized", table_name="extracted_entities")
     op.drop_table("extracted_entities")
     op.drop_table("message_analyses")

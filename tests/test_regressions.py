@@ -211,7 +211,7 @@ def test_messages_table_uses_equal_width_columns_and_truncates_content() -> None
     assert "table-fixed" in rendered
     assert rendered.count('class="w-1/6"') == 6
     assert "truncate" in rendered
-    assert 'data-message-detail-url="/api/messages/1"' in rendered
+    assert 'data-message-detail-url="/ui/fragments/messages/1"' in rendered
 
 
 @pytest.mark.asyncio

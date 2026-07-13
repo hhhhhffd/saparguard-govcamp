@@ -5,6 +5,20 @@
     <h3 class="text-sm font-medium text-slate-700">Текст сообщения</h3>
     <p class="mt-1 whitespace-pre-wrap break-words">{{ message.text or 'Текст отсутствует' }}</p>
   </section>
+  <section class="mt-4 border-t pt-4">
+    <h3 class="text-sm font-medium text-slate-700">Анализ</h3>
+    {% if message.analysis %}
+    <p class="mt-2">Тип: <span class="font-medium">{{ message.analysis.message_type }}</span> · confidence {{ '%.2f'|format(message.analysis.classification_confidence) }}</p>
+    <p class="text-sm text-slate-500">Версия: {{ message.analysis.analyzer_version }}</p>
+    {% if message.analysis.classification_evidence %}<p class="text-sm">Правила: {{ message.analysis.classification_evidence|join(', ') }}</p>{% endif %}
+    {% if message.analysis.attributes %}<p class="text-sm">Признаки: {% for key, value in message.analysis.attributes.items() if value %}{{ key }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    <p class="text-sm">Телефоны: {% for entity in message.analysis.entities if entity.entity_type == 'phone' %}{{ entity.normalized_value }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</p>
+    <p class="text-sm">Маршруты: {% for route in message.analysis.routes %}{{ route.normalized_origin }} → {{ route.normalized_destination }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</p>
+    <p class="text-sm">Автомобили: {% for entity in message.analysis.entities if entity.entity_type == 'vehicle' %}{{ entity.normalized_value }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</p>
+    {% elif message.analysis_job %}
+    <p class="mt-2 text-sm text-slate-500">{% if message.analysis_job.status == 'failed' %}Ошибка анализа: {{ message.analysis_job.last_error }}{% else %}Ещё не обработано: {{ message.analysis_job.status }}{% endif %}</p>
+    {% else %}<p class="mt-2 text-sm text-slate-500">Ещё не обработано.</p>{% endif %}
+  </section>
   {% for media in message.media_files %}
   <section class="mt-4 border-t pt-4">
     {% if media.relative_path %}

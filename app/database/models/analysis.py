@@ -31,6 +31,7 @@ class MessageAnalysisJob(Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     message: Mapped["TelegramMessage"] = relationship(back_populates="analysis_job")
 
@@ -47,6 +48,7 @@ class MessageAnalysis(Base):
     source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     analyzer_version: Mapped[str] = mapped_column(String(64), nullable=False)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    classification_evidence: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

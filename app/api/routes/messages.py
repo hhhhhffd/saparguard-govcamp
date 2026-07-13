@@ -103,6 +103,7 @@ def serialize_message(
         )
         data["analysis_error"] = message.analysis_job.last_error if message.analysis_job else None
         data["attributes"] = analysis.attributes if analysis else {}
+        data["classification_evidence"] = analysis.classification_evidence if analysis else []
         data["phones"] = [
             ExtractedEntityRead(
                 entity_type=e.entity_type,

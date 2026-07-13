@@ -7,8 +7,20 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database.models import MediaProcessingJob, TelegramChat, TelegramMessage
-from app.database.repositories import MediaJobRepository, MessageRepository
+from app.database.models import (
+    ExtractedEntity,
+    MediaProcessingJob,
+    MessageAnalysis,
+    MessageAnalysisJob,
+    TelegramChat,
+    TelegramMessage,
+)
+from app.database.repositories import (
+    MediaJobRepository,
+    MessageAnalysisJobRepository,
+    MessageRepository,
+)
+from app.processing.text.analyzer import analyze_message
 
 pytestmark = pytest.mark.integration
 
@@ -114,3 +126,53 @@ async def test_concurrent_claims_lease_different_jobs(
     first, second = await asyncio.gather(claim(), claim())
 
     assert {first.id, second.id} == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_analysis_completion_replaces_entities_atomically(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as session:
+        await create_chat(session)
+        message = await MessageRepository(session).upsert_message(
+            message_values(1), save_edit=False
+        )
+        await MessageAnalysisJobRepository(session).enqueue(message.id, "hash-a", "v1")
+    async with session_factory() as session:
+        repository = MessageAnalysisJobRepository(session)
+        job = await repository.claim_next_job()
+        assert job is not None
+        assert await repository.complete(
+            job, analyze_message("Алматы Бишкек +77020007123 Toyota Camry 70")
+        )
+    async with session_factory() as session:
+        analysis = await session.scalar(select(MessageAnalysis))
+        entities = list((await session.scalars(select(ExtractedEntity))).all())
+        assert analysis is not None
+        assert analysis.classification_evidence
+        assert any(entity.metadata_ for entity in entities)
+
+
+@pytest.mark.asyncio
+async def test_requeued_job_rejects_stale_worker_completion(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as session:
+        await create_chat(session)
+        message = await MessageRepository(session).upsert_message(
+            message_values(1), save_edit=False
+        )
+        await MessageAnalysisJobRepository(session).enqueue(message.id, "hash-a", "v1")
+    async with session_factory() as session:
+        stale_job = await MessageAnalysisJobRepository(session).claim_next_job()
+        assert stale_job is not None
+    async with session_factory.begin() as session:
+        assert await MessageAnalysisJobRepository(session).enqueue(
+            stale_job.message_id, "hash-b", "v1"
+        )
+    async with session_factory() as session:
+        assert not await MessageAnalysisJobRepository(session).complete(
+            stale_job, analyze_message("old")
+        )
+        job = await session.get(MessageAnalysisJob, stale_job.id)
+        assert job is not None and job.status == "pending" and job.source_text_hash == "hash-b"

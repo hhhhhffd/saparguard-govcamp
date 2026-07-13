@@ -88,6 +88,7 @@ class MessageDetailRead(MessageRead):
     analyzer_version: str | None
     analysis_error: str | None
     attributes: dict
+    classification_evidence: list[str]
     phones: list[ExtractedEntityRead]
     vehicles: list[ExtractedEntityRead]
     locations: list[ExtractedEntityRead]

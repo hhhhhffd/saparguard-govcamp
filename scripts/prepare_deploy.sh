@@ -28,7 +28,7 @@ rsync -a \
   --exclude '*.py[cod]' \
   --exclude '.pytest_cache/' \
   --exclude 'logs/' \
-  --exclude 'data/' \
+  --exclude '/data/' \
   --exclude 'deploy/' \
   --exclude '.env' \
   "${ROOT_DIR}/" "${STAGING_DIR}/"

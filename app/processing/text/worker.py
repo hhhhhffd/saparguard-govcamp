@@ -19,8 +19,11 @@ async def process_one_job() -> bool:
     try:
         result = analyze_message(job.message.text)
         async with SessionFactory() as session:
-            await MessageAnalysisJobRepository(session).complete(job, result)
-        logger.info("Completed text analysis job %s", job.id)
+            completed = await MessageAnalysisJobRepository(session).complete(job, result)
+        if completed:
+            logger.info("Completed text analysis job %s", job.id)
+        else:
+            logger.info("Discarded stale text analysis result for job %s", job.id)
     except Exception as exc:
         logger.exception("Text analysis job %s failed", job.id)
         async with SessionFactory() as session:
@@ -34,6 +37,7 @@ async def process_one_job() -> bool:
 
 
 async def run_worker() -> None:
+    last_recovery = 0.0
     async with SessionFactory() as session:
         recovered = await MessageAnalysisJobRepository(session).recover_stale_jobs(
             settings.text_analysis_job_stale_timeout_seconds
@@ -41,6 +45,13 @@ async def run_worker() -> None:
     if recovered:
         logger.warning("Returned %s stale text analysis jobs to pending", recovered)
     while True:
+        now = asyncio.get_running_loop().time()
+        if now - last_recovery >= 60:
+            async with SessionFactory() as session:
+                await MessageAnalysisJobRepository(session).recover_stale_jobs(
+                    settings.text_analysis_job_stale_timeout_seconds
+                )
+            last_recovery = now
         if not await process_one_job():
             await asyncio.sleep(settings.text_analysis_poll_interval_seconds)
 

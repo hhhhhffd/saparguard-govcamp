@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -12,6 +13,8 @@ from app.processing.text.models import AnalysisResult
 
 
 class MessageAnalysisJobRepository:
+    """Durable jobs guarded by a lease token against stale worker writes."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -39,6 +42,7 @@ class MessageAnalysisJobRepository:
                 "started_at": None,
                 "finished_at": None,
                 "next_retry_at": None,
+                "lease_token": None,
             },
             where=(MessageAnalysisJob.source_text_hash != excluded.source_text_hash)
             | (MessageAnalysisJob.analyzer_version != excluded.analyzer_version)
@@ -54,16 +58,22 @@ class MessageAnalysisJobRepository:
             .where(
                 MessageAnalysisJob.status == "processing", MessageAnalysisJob.started_at < cutoff
             )
-            .values(status="pending", started_at=None, next_retry_at=None)
+            .values(status="pending", started_at=None, next_retry_at=None, lease_token=None)
         )
         await self._session.commit()
         return result.rowcount or 0
 
     async def claim_next_job(self) -> MessageAnalysisJob | None:
+        lease_token = str(uuid4())
         result = await self._session.execute(
             text(
-                """UPDATE message_analysis_jobs SET status = 'processing', attempts = attempts + 1, started_at = NOW(), last_error = NULL WHERE id = (SELECT id FROM message_analysis_jobs WHERE status = 'pending' AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id"""
-            )
+                "UPDATE message_analysis_jobs SET status = 'processing', attempts = attempts + 1, "
+                "started_at = NOW(), last_error = NULL, lease_token = :lease_token WHERE id = ("
+                "SELECT id FROM message_analysis_jobs WHERE status = 'pending' "
+                "AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY created_at ASC "
+                "FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id"
+            ),
+            {"lease_token": lease_token},
         )
         job_id = result.scalar_one_or_none()
         if job_id is None:
@@ -73,12 +83,20 @@ class MessageAnalysisJobRepository:
         result = await self._session.execute(
             select(MessageAnalysisJob)
             .options(selectinload(MessageAnalysisJob.message))
-            .where(MessageAnalysisJob.id == job_id)
+            .where(
+                MessageAnalysisJob.id == job_id,
+                MessageAnalysisJob.status == "processing",
+                MessageAnalysisJob.lease_token == lease_token,
+            )
         )
-        return result.scalar_one()
+        return result.scalar_one_or_none()
 
-    async def complete(self, job: MessageAnalysisJob, result: AnalysisResult) -> None:
+    async def complete(self, job: MessageAnalysisJob, result: AnalysisResult) -> bool:
         now = datetime.now(timezone.utc)
+        claimed = await self._claimed_job(job, lock=True)
+        if claimed is None:
+            await self._session.rollback()
+            return False
         statement = insert(MessageAnalysis).values(
             message_id=job.message_id,
             message_type=result.classification.message_type,
@@ -86,6 +104,7 @@ class MessageAnalysisJobRepository:
             source_text_hash=job.source_text_hash,
             analyzer_version=job.analyzer_version,
             attributes=result.classification.attributes,
+            classification_evidence=list(result.classification.evidence),
             processed_at=now,
             created_at=now,
             updated_at=now,
@@ -98,6 +117,7 @@ class MessageAnalysisJobRepository:
                 "source_text_hash": statement.excluded.source_text_hash,
                 "analyzer_version": statement.excluded.analyzer_version,
                 "attributes": statement.excluded.attributes,
+                "classification_evidence": statement.excluded.classification_evidence,
                 "processed_at": now,
                 "updated_at": now,
             },
@@ -115,18 +135,18 @@ class MessageAnalysisJobRepository:
                 [
                     {
                         "analysis_id": analysis_id,
-                        "entity_type": e.entity_type,
-                        "role": e.role,
-                        "raw_value": e.raw_value,
-                        "normalized_value": e.normalized_value,
-                        "confidence": e.confidence,
-                        "evidence": e.evidence,
-                        "start_offset": e.start_offset,
-                        "end_offset": e.end_offset,
-                        "metadata": e.metadata,
+                        "entity_type": entity.entity_type,
+                        "role": entity.role,
+                        "raw_value": entity.raw_value,
+                        "normalized_value": entity.normalized_value,
+                        "confidence": entity.confidence,
+                        "evidence": entity.evidence,
+                        "start_offset": entity.start_offset,
+                        "end_offset": entity.end_offset,
+                        "metadata_": entity.metadata,
                         "created_at": now,
                     }
-                    for e in result.entities
+                    for entity in result.entities
                 ],
             )
         if result.routes:
@@ -135,37 +155,67 @@ class MessageAnalysisJobRepository:
                 [
                     {
                         "analysis_id": analysis_id,
-                        "raw_origin": r.raw_origin,
-                        "normalized_origin": r.normalized_origin,
-                        "raw_destination": r.raw_destination,
-                        "normalized_destination": r.normalized_destination,
-                        "confidence": r.confidence,
-                        "evidence": r.evidence,
+                        "raw_origin": route.raw_origin,
+                        "normalized_origin": route.normalized_origin,
+                        "raw_destination": route.raw_destination,
+                        "normalized_destination": route.normalized_destination,
+                        "confidence": route.confidence,
+                        "evidence": route.evidence,
                         "created_at": now,
                     }
-                    for r in result.routes
+                    for route in result.routes
                 ],
             )
         await self._session.execute(
             update(MessageAnalysisJob)
-            .where(MessageAnalysisJob.id == job.id)
-            .values(status="completed", finished_at=now, next_retry_at=None, last_error=None)
+            .where(
+                MessageAnalysisJob.id == job.id, MessageAnalysisJob.lease_token == job.lease_token
+            )
+            .values(
+                status="completed",
+                finished_at=now,
+                next_retry_at=None,
+                last_error=None,
+                lease_token=None,
+            )
         )
         await self._session.commit()
+        return True
 
     async def fail(
         self, job: MessageAnalysisJob, error: str, *, max_attempts: int, retry_delay_seconds: int
-    ) -> None:
+    ) -> bool:
+        if await self._claimed_job(job, lock=False) is None:
+            await self._session.rollback()
+            return False
         now = datetime.now(timezone.utc)
         terminal = job.attempts >= max_attempts
         await self._session.execute(
             update(MessageAnalysisJob)
-            .where(MessageAnalysisJob.id == job.id)
+            .where(
+                MessageAnalysisJob.id == job.id, MessageAnalysisJob.lease_token == job.lease_token
+            )
             .values(
                 status="failed" if terminal else "pending",
                 last_error=error[:1000],
                 finished_at=now if terminal else None,
                 next_retry_at=None if terminal else now + timedelta(seconds=retry_delay_seconds),
+                lease_token=None,
             )
         )
         await self._session.commit()
+        return True
+
+    async def _claimed_job(
+        self, job: MessageAnalysisJob, *, lock: bool
+    ) -> MessageAnalysisJob | None:
+        statement = select(MessageAnalysisJob).where(
+            MessageAnalysisJob.id == job.id,
+            MessageAnalysisJob.status == "processing",
+            MessageAnalysisJob.lease_token == job.lease_token,
+            MessageAnalysisJob.source_text_hash == job.source_text_hash,
+            MessageAnalysisJob.analyzer_version == job.analyzer_version,
+        )
+        if lock:
+            statement = statement.with_for_update()
+        return await self._session.scalar(statement)

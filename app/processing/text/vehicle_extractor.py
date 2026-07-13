@@ -5,31 +5,44 @@ import re
 from app.processing.text.data.vehicles import VEHICLE_ALIASES
 from app.processing.text.models import EntityResult
 
+GENERATION_PATTERN = r"(?:50|55|70|w220)"
+YEAR_PATTERN = r"(?:19[89]\d|20[0-2]\d)"
+
 
 def extract_vehicles(text: str | None) -> list[EntityResult]:
     value = text or ""
     results: list[EntityResult] = []
+    seen: set[tuple[int, str]] = set()
     for make, details in VEHICLE_ALIASES.items():
-        for alias in details["aliases"]:
-            for match in re.finditer(
-                r"(?<!\w)" + re.escape(alias) + r"(?!\w)(?:\s+([\w-]+))?", value, re.I
-            ):
+        model_aliases = {
+            alias: model for model, aliases in details["models"].items() for alias in aliases
+        }
+        prefixes = [*details["aliases"], *model_aliases]
+        for prefix in prefixes:
+            pattern = re.compile(
+                rf"(?<!\w)({re.escape(prefix)})(?:\s+({GENERATION_PATTERN}))?(?:\s+({YEAR_PATTERN}))?(?!\w)",
+                re.IGNORECASE,
+            )
+            for match in pattern.finditer(value):
+                model = model_aliases.get(prefix.casefold())
+                if model is None and match.group(1).casefold() in model_aliases:
+                    model = model_aliases[match.group(1).casefold()]
+                generation = match.group(2)
+                year = match.group(3)
                 fragment = match.group(0)
-                model = None
-                for canonical, aliases in details["models"].items():
-                    if match.group(1) and match.group(1).casefold() in aliases:
-                        model = canonical
-                generation = re.search(r"\b(?:50|55|70|w220)\b", fragment, re.I)
-                year = re.search(r"\b(19[89]\d|20[0-2]\d)\b", value[match.end() : match.end() + 12])
-                metadata = {"make": make}
+                key = (match.start(), fragment.casefold())
+                if key in seen:
+                    continue
+                seen.add(key)
+                metadata: dict[str, object] = {"make": make}
                 if model:
                     metadata["model"] = model
                 if generation:
-                    metadata["generation"] = generation.group(0).upper()
+                    metadata["generation"] = generation.upper()
                 if year:
-                    metadata["year"] = int(year.group(0))
+                    metadata["year"] = int(year)
                 normalized = " ".join(
-                    filter(None, (make, model, generation.group(0) if generation else None))
+                    filter(None, (make, model, generation.upper() if generation else None))
                 )
                 results.append(
                     EntityResult(

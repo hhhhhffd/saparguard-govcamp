@@ -42,4 +42,10 @@ def extract_routes_and_locations(text: str | None) -> tuple[list[EntityResult], 
         first, last = aliases
         if first[2] != last[2]:
             routes.append(RouteResult(first[3], first[2], last[3], last[2], 0.76, "route_pair"))
+            if "↔" in value:
+                routes.append(
+                    RouteResult(
+                        last[3], last[2], first[3], first[2], 0.76, "bidirectional_route_pair"
+                    )
+                )
     return locations, routes

@@ -57,3 +57,18 @@ def test_many_locations_do_not_create_cartesian_routes() -> None:
 def test_analysis_is_reproducible() -> None:
     text = "Алматы → Бишкек Toyota Camry +996555401053"
     assert analyze_message(text) == analyze_message(text)
+
+
+def test_word_rabotayu_is_not_a_bot_service_message() -> None:
+    result = analyze_message("Работаю 24/7, такси Алматы Бишкек")
+    assert result.classification.message_type == "driver_offer"
+
+
+def test_vehicle_model_only_and_generation_formats() -> None:
+    vehicles = [
+        item.metadata
+        for item in analyze_message("Камри 70, Грандер 2022, Сиена 2020").entities
+        if item.entity_type == "vehicle"
+    ]
+    assert {item.get("model") for item in vehicles} == {"Camry", "Grandeur", "Sienna"}
+    assert any(item.get("generation") == "70" for item in vehicles)

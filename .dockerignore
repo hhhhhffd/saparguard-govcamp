@@ -7,7 +7,7 @@ __pycache__
 .pytest_cache
 web-assets/node_modules
 logs
-data
+/data
 deploy
 .codegraph
 .serena

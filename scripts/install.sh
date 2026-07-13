@@ -35,7 +35,7 @@ fi
 note "Preparing application files in ${INSTALL_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${INSTALL_DIR}"
 rsync -a --delete \
-  --exclude '.venv/' --exclude 'data/' --exclude 'logs/' --exclude '.env' \
+  --exclude '.venv/' --exclude '/data/' --exclude 'logs/' --exclude '.env' \
   "${BUNDLE_DIR}/" "${INSTALL_DIR}/"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs"
 if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
