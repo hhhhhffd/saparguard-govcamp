@@ -76,7 +76,8 @@ session, логи или `.env`.
 ## Routes
 
 - JSON API: `/api/sources`, `/api/messages`, `/api/media`, `/api/stats`, `/api/collector/status`;
-- pages: `/`, `/sources`, `/messages`;
+- profile API: `/api/profiles`, `/api/profiles/{id}`, `/api/vehicles`, `/api/vehicles/{id}`;
+- pages: `/`, `/sources`, `/messages`, `/profiles`, `/profiles/{id}`, `/vehicles/{id}`;
 - HTMX fragments: `/ui/fragments/...`;
 - изменяющие Web actions (POST): `/ui/actions/...`.
 
@@ -106,3 +107,15 @@ alembic upgrade head
 docker compose config
 docker compose build
 ```
+
+## Observed profiles and vehicles
+
+`profile-worker` resolves only `driver_offer` and `parcel_offer` messages. Exact normalized phones
+create/reuse phone-based observed profiles; Telegram user IDs are a conservative fallback and are
+not used for bot-like relays. Multiple phones result in separate profiles joined only by a
+`co_occurring_contact` relation. Exact high-confidence plates create global vehicle identities;
+vehicles without plates remain scoped to one profile signature. Profiles are observations from
+public ads, not verified people or proof of vehicle ownership.
+
+Run the worker with `python -m app.processing.profiles.worker`; queue stored messages with
+`python -m app.processing.profiles.backfill --days 7 [--limit N] [--force] [--only-provider-messages]`.

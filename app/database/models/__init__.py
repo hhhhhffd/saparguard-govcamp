@@ -6,6 +6,17 @@ from app.database.models.analysis import (
     MessageRoute,
 )
 from app.database.models.media import MediaFile, MediaProcessingJob, PlateDetection
+from app.database.models.profiles import (
+    ProfileIdentifier,
+    ProfileOccurrence,
+    ProfileRelation,
+    ProfileResolutionConflict,
+    ProfileResolutionJob,
+    ProfileVehicleLink,
+    TransportProfile,
+    Vehicle,
+    VehicleObservation,
+)
 from app.database.models.telegram import (
     CollectorState,
     MessageEdit,
@@ -25,6 +36,15 @@ __all__ = [
     "MessageAnalysisJob",
     "MessageRoute",
     "PlateDetection",
+    "ProfileIdentifier",
+    "ProfileOccurrence",
+    "ProfileRelation",
+    "ProfileResolutionConflict",
+    "ProfileResolutionJob",
+    "ProfileVehicleLink",
+    "TransportProfile",
+    "Vehicle",
+    "VehicleObservation",
     "TelegramChat",
     "TelegramMessage",
     "TelegramUser",

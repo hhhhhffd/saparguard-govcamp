@@ -1,0 +1,9 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ profile.canonical_label }} — SaparGuard{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold">{{ profile.canonical_label }}</h1>
+<p class="my-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm">Профиль построен автоматически по публичным объявлениям и не подтверждает личность человека или право собственности на автомобиль.</p>
+<h2 class="mt-6 text-lg font-semibold">Контакты и Telegram identifiers</h2><ul>{% for item in identifiers %}<li>{{ item.identifier_type }}: {{ item.normalized_value }} ({{ item.identifier_role }})</li>{% endfor %}</ul>
+<h2 class="mt-6 text-lg font-semibold">Автомобили</h2><ul>{% for vehicle in vehicles %}<li><a class="text-blue-700" href="/vehicles/{{ vehicle.id }}">{{ vehicle.canonical_label }}</a></li>{% else %}<li>Нет наблюдений.</li>{% endfor %}</ul>
+<h2 class="mt-6 text-lg font-semibold">История объявлений</h2><ul>{% for occurrence, message in occurrences %}<li class="border-b py-2">{{ message.published_at }} — {{ message.text }} {% if occurrence.source_deleted %}<span class="text-slate-500">(удалено в источнике)</span>{% endif %}</li>{% endfor %}</ul>
+{% endblock %}

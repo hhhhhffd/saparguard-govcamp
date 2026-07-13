@@ -1,0 +1,16 @@
+[Unit]
+Description=SaparGuard profile resolution worker
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=__INSTALL_DIR__/.env
+ExecStart=__INSTALL_DIR__/.venv/bin/python -m app.processing.profiles.worker
+Restart=always
+RestartSec=5
+User=saparguard
+Group=saparguard
+
+[Install]
+WantedBy=multi-user.target

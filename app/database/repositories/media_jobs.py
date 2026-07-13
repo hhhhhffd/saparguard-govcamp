@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.enums import MediaJobStatus, MediaProcessingStatus
 from app.database.models import MediaFile, MediaProcessingJob, PlateDetection
+from app.processing.profiles.repository import ProfileResolutionRepository
 
 
 class MediaJobRepository:
@@ -154,6 +155,13 @@ class MediaJobRepository:
                 finished_at=now,
                 next_retry_at=None,
                 last_error=None,
+            )
+        )
+        await ProfileResolutionRepository(self._session).enqueue_for_message(
+            (
+                await self._session.scalar(
+                    select(MediaFile.message_id).where(MediaFile.id == media_file_id)
+                )
             )
         )
         await self._session.commit()

@@ -60,6 +60,30 @@ class Settings(BaseSettings):
     text_analyzer_version: str = Field(
         default="20260714.1", validation_alias="TEXT_ANALYZER_VERSION"
     )
+    profile_resolver_version: str = Field(
+        default="profile-v1", validation_alias="PROFILE_RESOLVER_VERSION"
+    )
+    profile_job_max_attempts: int = Field(
+        default=5, ge=1, validation_alias="PROFILE_JOB_MAX_ATTEMPTS"
+    )
+    profile_job_retry_delay_seconds: int = Field(
+        default=30, ge=1, validation_alias="PROFILE_JOB_RETRY_DELAY_SECONDS"
+    )
+    profile_job_stale_timeout_seconds: int = Field(
+        default=900, ge=1, validation_alias="PROFILE_JOB_STALE_TIMEOUT_SECONDS"
+    )
+    profile_job_poll_interval_seconds: int = Field(
+        default=2, ge=1, validation_alias="PROFILE_JOB_POLL_INTERVAL_SECONDS"
+    )
+    profile_job_recovery_interval_seconds: int = Field(
+        default=60, ge=1, validation_alias="PROFILE_JOB_RECOVERY_INTERVAL_SECONDS"
+    )
+    profile_plate_min_confidence: float = Field(
+        default=0.80, ge=0, le=1, validation_alias="PROFILE_PLATE_MIN_CONFIDENCE"
+    )
+    profile_sender_relay_distinct_phone_limit: int = Field(
+        default=3, ge=1, validation_alias="PROFILE_SENDER_RELAY_DISTINCT_PHONE_LIMIT"
+    )
 
 
 settings = Settings()

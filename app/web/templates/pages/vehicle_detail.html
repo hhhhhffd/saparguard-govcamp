@@ -1,0 +1,6 @@
+{% extends "layouts/base.html" %}
+{% block title %}{{ vehicle.canonical_label }} — SaparGuard{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold">{{ vehicle.canonical_label }}</h1>
+<dl class="mt-6 grid grid-cols-2 gap-3"><dt>Госномер</dt><dd>{{ vehicle.normalized_plate or '—' }}</dd><dt>Марка / модель</dt><dd>{{ vehicle.make or '' }} {{ vehicle.model or '' }}</dd><dt>Поколение / год</dt><dd>{{ vehicle.generation or '' }} {{ vehicle.year or '' }}</dd><dt>Наблюдений</dt><dd>{{ vehicle.observation_count }}</dd></dl>
+{% endblock %}

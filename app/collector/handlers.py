@@ -7,6 +7,7 @@ from telethon import events
 from app.collector.history import persist_message
 from app.core.enums import CollectorSyncStatus
 from app.database.repositories import CollectorStateRepository, MessageRepository, SourceRepository
+from app.processing.profiles.repository import ProfileResolutionRepository
 from app.database.session import SessionFactory
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,12 @@ async def handle_deleted_message(event: events.MessageDeleted.Event) -> None:
             return
         async with SessionFactory.begin() as session:
             count = await MessageRepository(session).mark_deleted(chat_id, event.deleted_ids)
+            message_ids = await MessageRepository(session).ids_for_telegram_messages(
+                chat_id, event.deleted_ids
+            )
+            profile_repository = ProfileResolutionRepository(session)
+            for message_id in message_ids:
+                await profile_repository.enqueue_for_message(message_id)
         logger.info("Marked %s deleted messages in chat %s", count, chat_id)
     except Exception:
         logger.exception("Could not mark deleted Telegram messages")

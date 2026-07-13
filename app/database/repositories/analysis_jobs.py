@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database.models import ExtractedEntity, MessageAnalysis, MessageAnalysisJob, MessageRoute
 from app.processing.text.models import AnalysisResult
+from app.processing.profiles.repository import ProfileResolutionRepository
 
 
 class MessageAnalysisJobRepository:
@@ -179,6 +180,7 @@ class MessageAnalysisJobRepository:
                 lease_token=None,
             )
         )
+        await ProfileResolutionRepository(self._session).enqueue_for_message(job.message_id)
         await self._session.commit()
         return True
 

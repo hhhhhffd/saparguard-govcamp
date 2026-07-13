@@ -73,6 +73,20 @@ class MessageRepository:
         )
         return result.rowcount or 0
 
+    async def ids_for_telegram_messages(
+        self, telegram_chat_id: int, telegram_message_ids: list[int]
+    ) -> list[int]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(TelegramMessage.id).where(
+                        TelegramMessage.telegram_chat_id == telegram_chat_id,
+                        TelegramMessage.telegram_message_id.in_(telegram_message_ids),
+                    )
+                )
+            ).all()
+        )
+
     async def get(self, message_id: int) -> TelegramMessage | None:
         result = await self._session.execute(
             select(TelegramMessage)

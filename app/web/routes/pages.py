@@ -9,7 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.database.models import TelegramChat, TelegramMessage
+from app.database.models import (
+    ProfileIdentifier,
+    ProfileOccurrence,
+    ProfileVehicleLink,
+    TelegramChat,
+    TelegramMessage,
+    TransportProfile,
+    Vehicle,
+)
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
 from app.web.templating import templates
@@ -151,3 +159,148 @@ async def messages_page(
     )
     context["display_timezone"] = settings.display_timezone
     return templates.TemplateResponse(request, "pages/messages.html", context)
+
+
+@router.get("/profiles", response_class=HTMLResponse)
+async def profiles_page(
+    request: Request,
+    phone: str | None = None,
+    telegram_user_id: str | None = None,
+    plate: str | None = None,
+    vehicle: str | None = None,
+    has_conflicts: bool | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    filters = []
+    if phone:
+        filters.append(
+            TransportProfile.id.in_(
+                select(ProfileIdentifier.profile_id).where(
+                    ProfileIdentifier.identifier_type == "phone",
+                    ProfileIdentifier.normalized_value.ilike(f"%{phone}%"),
+                )
+            )
+        )
+    if telegram_user_id:
+        filters.append(
+            TransportProfile.id.in_(
+                select(ProfileIdentifier.profile_id).where(
+                    ProfileIdentifier.identifier_type == "telegram_user_id",
+                    ProfileIdentifier.normalized_value.ilike(f"%{telegram_user_id}%"),
+                )
+            )
+        )
+    if plate or vehicle:
+        vehicle_query = select(ProfileVehicleLink.profile_id).join(Vehicle)
+        if plate:
+            vehicle_query = vehicle_query.where(Vehicle.normalized_plate.ilike(f"%{plate}%"))
+        if vehicle:
+            vehicle_query = vehicle_query.where(Vehicle.canonical_label.ilike(f"%{vehicle}%"))
+        filters.append(TransportProfile.id.in_(vehicle_query))
+    profiles = list(
+        (
+            await session.scalars(
+                select(TransportProfile)
+                .where(*filters)
+                .order_by(TransportProfile.last_seen_at.desc())
+                .limit(100)
+            )
+        ).all()
+    )
+    identifiers = (
+        (
+            await session.execute(
+                select(
+                    ProfileIdentifier.profile_id,
+                    ProfileIdentifier.identifier_type,
+                    ProfileIdentifier.normalized_value,
+                ).where(ProfileIdentifier.profile_id.in_([profile.id for profile in profiles]))
+            )
+        ).all()
+        if profiles
+        else []
+    )
+    by_profile: dict[int, list[tuple[str, str]]] = {profile.id: [] for profile in profiles}
+    for profile_id, identifier_type, value in identifiers:
+        by_profile[profile_id].append((identifier_type, value))
+    return templates.TemplateResponse(
+        request,
+        "pages/profiles.html",
+        {
+            "profiles": profiles,
+            "identifiers": by_profile,
+            "filters": {
+                "phone": phone or "",
+                "telegram_user_id": telegram_user_id or "",
+                "plate": plate or "",
+                "vehicle": vehicle or "",
+                "has_conflicts": has_conflicts,
+            },
+            "display_timezone": settings.display_timezone,
+        },
+    )
+
+
+@router.get("/profiles/{profile_id}", response_class=HTMLResponse)
+async def profile_page(
+    profile_id: int, request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    profile = await session.get(TransportProfile, profile_id)
+    if profile is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Profile not found")
+    identifiers = list(
+        (
+            await session.scalars(
+                select(ProfileIdentifier).where(ProfileIdentifier.profile_id == profile_id)
+            )
+        ).all()
+    )
+    occurrences = (
+        await session.execute(
+            select(ProfileOccurrence, TelegramMessage)
+            .join(TelegramMessage)
+            .where(ProfileOccurrence.profile_id == profile_id)
+            .order_by(TelegramMessage.published_at.desc())
+            .limit(100)
+        )
+    ).all()
+    vehicles = (
+        (
+            await session.execute(
+                select(Vehicle)
+                .join(ProfileVehicleLink)
+                .where(ProfileVehicleLink.profile_id == profile_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "pages/profile_detail.html",
+        {
+            "profile": profile,
+            "identifiers": identifiers,
+            "occurrences": occurrences,
+            "vehicles": vehicles,
+            "display_timezone": settings.display_timezone,
+        },
+    )
+
+
+@router.get("/vehicles/{vehicle_id}", response_class=HTMLResponse)
+async def vehicle_page(
+    vehicle_id: int, request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    vehicle = await session.get(Vehicle, vehicle_id)
+    if vehicle is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    return templates.TemplateResponse(
+        request,
+        "pages/vehicle_detail.html",
+        {"vehicle": vehicle, "display_timezone": settings.display_timezone},
+    )
