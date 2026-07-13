@@ -72,3 +72,19 @@ def test_vehicle_model_only_and_generation_formats() -> None:
     ]
     assert {item.get("model") for item in vehicles} == {"Camry", "Grandeur", "Sienna"}
     assert any(item.get("generation") == "70" for item in vehicles)
+
+
+def test_driver_offer_accepting_parcels_keeps_driver_type() -> None:
+    result = analyze_message("Такси Алматы Бишкек, принимаю посылки, +77020007123")
+    assert result.classification.message_type == "driver_offer"
+    assert result.classification.attributes["accepts_parcels"] is True
+
+
+def test_vehicle_make_and_model_are_deduplicated() -> None:
+    vehicles = [
+        item
+        for item in analyze_message("Toyota Camry 70").entities
+        if item.entity_type == "vehicle"
+    ]
+    assert len(vehicles) == 1
+    assert vehicles[0].normalized_value == "Toyota Camry 70"

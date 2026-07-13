@@ -2,7 +2,7 @@
 .DS_Store
 *.session
 *.session-journal
-data/
+/data/
 __pycache__/
 *.py[cod]
 .pytest_cache/

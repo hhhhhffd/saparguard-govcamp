@@ -47,7 +47,10 @@ RULES = (
     ),
 )
 ATTRIBUTES = {
-    "accepts_parcels": (r"посыл.{0,12}(бер|приним|достав)",),
+    "accepts_parcels": (
+        r"посыл.{0,12}(бер|приним|достав|алам)",
+        r"(бер|приним|достав|алам).{0,12}посыл",
+    ),
     "airport_transfer": (r"аэропорт",),
     "door_to_door": (r"от двери до двери|дверь до двер|от адреса до адреса",),
     "available_24_7": (r"24.?7|круглосуточ",),
@@ -69,6 +72,14 @@ def classify(text: str | None) -> ClassificationResult:
     if not value.strip():
         return ClassificationResult("unknown", 1.0, ("empty_text",), attributes)
     if scores:
+        if "driver_offer" in scores and attributes.get("accepts_parcels"):
+            confidence, evidence = scores["driver_offer"]
+            return ClassificationResult(
+                "driver_offer",
+                max(confidence, 0.9),
+                tuple([*evidence, "accepts_parcels"]),
+                attributes,
+            )
         message_type, (confidence, evidence) = max(scores.items(), key=lambda item: item[1][0])
         return ClassificationResult(message_type, confidence, tuple(evidence), attributes)
     if len(value.split()) <= 5:

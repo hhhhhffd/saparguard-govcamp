@@ -56,4 +56,18 @@ def extract_vehicles(text: str | None) -> list[EntityResult]:
                         metadata=metadata,
                     )
                 )
-    return results
+    return [vehicle for vehicle in results if not _is_less_specific_make_only(vehicle, results)]
+
+
+def _is_less_specific_make_only(vehicle: EntityResult, candidates: list[EntityResult]) -> bool:
+    """Keep a make-only mention only when no nearby model identifies that same car."""
+    if vehicle.metadata.get("model") or vehicle.end_offset is None:
+        return False
+    make = vehicle.metadata["make"]
+    return any(
+        candidate.metadata.get("make") == make
+        and candidate.metadata.get("model")
+        and candidate.start_offset is not None
+        and vehicle.end_offset <= candidate.start_offset <= vehicle.end_offset + 3
+        for candidate in candidates
+    )

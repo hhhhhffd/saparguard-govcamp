@@ -16,7 +16,8 @@
     <td class="truncate p-3" title="{{ chat_name }}">{{ chat_name }}</td>
     <td class="truncate p-3" title="{{ sender_name }}">{{ sender_name }}</td>
     <td class="truncate p-3" title="{{ message_text }}">{{ message_text }}</td>
-    <td class="truncate p-3"><span class="rounded bg-slate-100 px-2 py-1 text-xs">{{ message.analysis.message_type if message.analysis else 'не обработано' }}</span></td>
+    {% set current_analysis = message.analysis and message.analysis_job and message.analysis_job.status == 'completed' and message.analysis.source_text_hash == message.analysis_job.source_text_hash and message.analysis.analyzer_version == message.analysis_job.analyzer_version %}
+    <td class="truncate p-3"><span class="rounded bg-slate-100 px-2 py-1 text-xs">{{ message.analysis.message_type if current_analysis else ('переобработка' if message.analysis else 'не обработано') }}</span></td>
     <td class="p-3">
       <div class="flex items-center gap-2">
         <span class="truncate" title="{{ status }}">{{ status }}</span>

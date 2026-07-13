@@ -27,9 +27,25 @@ from app.schemas.messages import (
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
+def analysis_is_current(message: TelegramMessage) -> bool:
+    return bool(
+        message.analysis
+        and message.analysis_job
+        and message.analysis_job.status == "completed"
+        and message.analysis.source_text_hash == message.analysis_job.source_text_hash
+        and message.analysis.analyzer_version == message.analysis_job.analyzer_version
+    )
+
+
 def serialize_message(
     message: TelegramMessage, include_details: bool = False
 ) -> MessageRead | MessageDetailRead:
+    current_analysis = analysis_is_current(message)
+    analysis_status = (
+        "reprocessing"
+        if message.analysis and not current_analysis
+        else (message.analysis_job.status if message.analysis_job else None)
+    )
     data: dict[str, Any] = {
         "id": message.id,
         "telegram_message_id": message.telegram_message_id,
@@ -60,15 +76,15 @@ def serialize_message(
             else None
         ),
         "analysis": AnalysisSummaryRead(
-            status=message.analysis_job.status if message.analysis_job else None,
-            message_type=message.analysis.message_type if message.analysis else None,
+            status=analysis_status,
+            message_type=message.analysis.message_type if current_analysis else None,
             classification_confidence=message.analysis.classification_confidence
-            if message.analysis
+            if current_analysis
             else None,
         ),
     }
     if include_details:
-        analysis = message.analysis
+        analysis = message.analysis if current_analysis else None
         entities = analysis.entities if analysis else []
         data["edits"] = [
             MessageEditRead(
@@ -95,7 +111,7 @@ def serialize_message(
             )
             for media in message.media_files
         ]
-        data["analysis_status"] = message.analysis_job.status if message.analysis_job else None
+        data["analysis_status"] = analysis_status
         data["analyzer_version"] = (
             analysis.analyzer_version
             if analysis
