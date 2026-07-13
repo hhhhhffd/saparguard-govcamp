@@ -791,14 +791,25 @@ class ProfileResolutionRepository:
                 statement = statement.where(
                     TelegramMessage.telegram_sender_id == int(identifier.normalized_value)
                 )
+            elif identifier.identifier_type == "telegram_username":
+                sender_id = await self._session.scalar(
+                    select(ProfileIdentifier.normalized_value).where(
+                        ProfileIdentifier.profile_id == profile_id,
+                        ProfileIdentifier.identifier_type == "telegram_user_id",
+                        ProfileIdentifier.identifier_role == "anchor",
+                    )
+                )
+                if sender_id is None:
+                    continue
+                statement = statement.where(TelegramMessage.telegram_sender_id == int(sender_id))
             else:
                 continue
             count, first, last = (await self._session.execute(statement)).one()
+            identifier.occurrence_count = count or 0
             if count:
-                identifier.occurrence_count = count
                 identifier.first_seen_at = first
                 identifier.last_seen_at = last
-                identifier.updated_at = now
+            identifier.updated_at = now
 
     async def _refresh_links(self, profile_ids: set[int]) -> None:
         if not profile_ids:

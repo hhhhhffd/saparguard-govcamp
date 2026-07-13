@@ -13,10 +13,14 @@ from app.database.models import (
     MessageAnalysis,
     MessageAnalysisJob,
     ProfileOccurrence,
+    ProfileRelation,
     ProfileResolutionJob,
+    ProfileSharedVehicleObservation,
+    ProfileVehicleLinkObservation,
     TransportProfile,
     TelegramChat,
     TelegramMessage,
+    Vehicle,
 )
 from app.database.repositories import (
     MediaJobRepository,
@@ -212,3 +216,95 @@ async def test_profile_resolution_groups_exact_phone_idempotently(
         job = await session.scalar(select(ProfileResolutionJob).limit(1))
         assert job is not None
         assert not await ProfileResolutionRepository(session).enqueue_for_message(job.message_id)
+
+
+@pytest.mark.asyncio
+async def test_shared_vehicle_is_aggregated_across_messages(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    observed_at = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    async with session_factory.begin() as session:
+        first = TransportProfile(
+            profile_kind="phone",
+            canonical_label="A",
+            status="active",
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+            occurrence_count=0,
+            active_occurrence_count=0,
+            resolver_version="test",
+            created_at=observed_at,
+            updated_at=observed_at,
+        )
+        second = TransportProfile(
+            profile_kind="phone",
+            canonical_label="B",
+            status="active",
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+            occurrence_count=0,
+            active_occurrence_count=0,
+            resolver_version="test",
+            created_at=observed_at,
+            updated_at=observed_at,
+        )
+        vehicle = Vehicle(
+            identity_kind="plate",
+            normalized_plate="123ABC01",
+            profile_signature_key=None,
+            make=None,
+            model=None,
+            generation=None,
+            year=None,
+            canonical_label="123ABC01",
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
+            observation_count=0,
+            created_at=observed_at,
+            updated_at=observed_at,
+        )
+        session.add_all((first, second, vehicle))
+        await session.flush()
+        await create_chat(session)
+        messages = [
+            await MessageRepository(session).upsert_message(
+                message_values(message_id), save_edit=False
+            )
+            for message_id in (1, 2)
+        ]
+        session.add_all(
+            (
+                ProfileVehicleLinkObservation(
+                    profile_id=first.id,
+                    vehicle_id=vehicle.id,
+                    message_id=messages[0].id,
+                    confidence=1.0,
+                    evidence={},
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                ),
+                ProfileVehicleLinkObservation(
+                    profile_id=second.id,
+                    vehicle_id=vehicle.id,
+                    message_id=messages[1].id,
+                    confidence=1.0,
+                    evidence={},
+                    observed_at=observed_at,
+                    created_at=observed_at,
+                ),
+            )
+        )
+        vehicle_id = vehicle.id
+        profile_ids = {first.id, second.id}
+    async with session_factory.begin() as session:
+        repository = ProfileResolutionRepository(session)
+        await repository._refresh_shared_vehicle_observations({vehicle_id})
+        await repository._refresh_relations(profile_ids)
+    async with session_factory() as session:
+        source = await session.scalar(select(ProfileSharedVehicleObservation))
+        relation = await session.scalar(
+            select(ProfileRelation).where(ProfileRelation.relation_type == "shared_vehicle")
+        )
+        assert source is not None and source.vehicle_id == vehicle_id
+        assert relation is not None
+        assert relation.evidence == {"vehicle_ids": [vehicle_id], "source_count": 1}
