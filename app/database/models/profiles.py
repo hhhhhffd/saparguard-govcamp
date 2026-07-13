@@ -96,12 +96,35 @@ class ProfileRelation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProfileRelationObservation(Base):
+    __tablename__ = "profile_relation_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "left_profile_id < right_profile_id", name="ck_profile_relation_observations_pair"
+        ),
+        UniqueConstraint("left_profile_id", "right_profile_id", "relation_type", "message_id"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    left_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_profiles.id"), nullable=False
+    )
+    right_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_profiles.id"), nullable=False
+    )
+    relation_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    message_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Vehicle(Base):
     __tablename__ = "vehicles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     identity_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     normalized_plate: Mapped[str | None] = mapped_column(String(128), unique=True)
+    profile_signature_key: Mapped[str | None] = mapped_column(String(64), unique=True)
     make: Mapped[str | None] = mapped_column(String(128))
     model: Mapped[str | None] = mapped_column(String(128))
     generation: Mapped[str | None] = mapped_column(String(128))
@@ -158,6 +181,16 @@ class ProfileVehicleLink(Base):
     evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProfileVehicleLinkObservation(Base):
+    __tablename__ = "profile_vehicle_link_observations"
+    profile_id: Mapped[int] = mapped_column(ForeignKey("transport_profiles.id"), primary_key=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), primary_key=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ProfileResolutionConflict(Base):

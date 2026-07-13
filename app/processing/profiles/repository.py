@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 from uuid import uuid4
 
 from sqlalchemy import delete, func, select, text, update
@@ -17,9 +19,11 @@ from app.database.models import (
     ProfileIdentifier,
     ProfileOccurrence,
     ProfileRelation,
+    ProfileRelationObservation,
     ProfileResolutionConflict,
     ProfileResolutionJob,
     ProfileVehicleLink,
+    ProfileVehicleLinkObservation,
     TelegramMessage,
     TransportProfile,
     Vehicle,
@@ -113,7 +117,7 @@ class ProfileResolutionRepository:
         token = str(uuid4())
         result = await self._session.execute(
             text(
-                "UPDATE profile_resolution_jobs SET status = 'processing', attempts = attempts + 1, started_at = NOW(), last_error = NULL, lease_token = :token WHERE id = (SELECT id FROM profile_resolution_jobs WHERE status = 'pending' AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id"
+                "UPDATE profile_resolution_jobs SET status = 'processing', attempts = attempts + 1, started_at = NOW(), last_error = NULL, lease_token = :token WHERE id = (SELECT id FROM profile_resolution_jobs WHERE status IN ('pending', 'waiting') AND (next_retry_at IS NULL OR next_retry_at <= NOW()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id"
             ),
             {"token": token},
         )
@@ -192,6 +196,16 @@ class ProfileResolutionRepository:
             delete(VehicleObservation).where(VehicleObservation.message_id == message.id)
         )
         await self._session.execute(
+            delete(ProfileRelationObservation).where(
+                ProfileRelationObservation.message_id == message.id
+            )
+        )
+        await self._session.execute(
+            delete(ProfileVehicleLinkObservation).where(
+                ProfileVehicleLinkObservation.message_id == message.id
+            )
+        )
+        await self._session.execute(
             delete(ProfileResolutionConflict).where(
                 ProfileResolutionConflict.message_id == message.id
             )
@@ -232,16 +246,14 @@ class ProfileResolutionRepository:
         if len(profiles) > 1:
             for index, left in enumerate(profiles):
                 for right in profiles[index + 1 :]:
-                    await self._relation(
-                        left.id, right.id, "co_occurring_contact", {"message_id": message.id}
-                    )
+                    await self._relation(left.id, right.id, "co_occurring_contact", message.id, {})
         if phones and message.telegram_sender_id is not None:
             telegram = await self._existing_telegram_profile(message.telegram_sender_id)
             if telegram:
                 for profile in profiles:
                     if profile.id != telegram.id:
                         await self._relation(
-                            telegram.id, profile.id, "shared_sender", {"message_id": message.id}
+                            telegram.id, profile.id, "shared_sender", message.id, {}
                         )
         await self._resolve_vehicles(message, profiles)
         affected_profiles = set(old_profile_ids) | {profile.id for profile in profiles}
@@ -259,6 +271,7 @@ class ProfileResolutionRepository:
         for vehicle_id in affected_vehicles:
             await self._refresh_vehicle(vehicle_id)
         await self._refresh_links_and_shared_vehicle(message.id, affected_profiles)
+        await self._refresh_relations(affected_profiles)
         await self._complete(job)
         await self._session.commit()
         return "completed"
@@ -289,6 +302,10 @@ class ProfileResolutionRepository:
     async def _phone_profile(
         self, entity: ExtractedEntity, message: TelegramMessage
     ) -> TransportProfile:
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"profile-phone:{entity.normalized_value}"},
+        )
         profile = await self._session.scalar(
             select(TransportProfile)
             .join(ProfileIdentifier)
@@ -424,35 +441,27 @@ class ProfileResolutionRepository:
         return (phone_count or 0) >= settings.profile_sender_relay_distinct_phone_limit
 
     async def _relation(
-        self, profile_a: int, profile_b: int, kind: str, evidence: dict[str, object]
+        self,
+        profile_a: int,
+        profile_b: int,
+        kind: str,
+        message_id: int,
+        evidence: dict[str, object],
     ) -> None:
         if profile_a == profile_b:
             return
         left, right = sorted((profile_a, profile_b))
         now = datetime.now(timezone.utc)
-        stmt = insert(ProfileRelation).values(
+        stmt = insert(ProfileRelationObservation).values(
             left_profile_id=left,
             right_profile_id=right,
             relation_type=kind,
+            message_id=message_id,
             confidence=1.0,
-            first_seen_at=now,
-            last_seen_at=now,
-            occurrence_count=1,
             evidence=evidence,
             created_at=now,
-            updated_at=now,
         )
-        await self._session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["left_profile_id", "right_profile_id", "relation_type"],
-                set_={
-                    "last_seen_at": now,
-                    "occurrence_count": ProfileRelation.occurrence_count + 1,
-                    "evidence": evidence,
-                    "updated_at": now,
-                },
-            )
-        )
+        await self._session.execute(stmt.on_conflict_do_nothing())
 
     async def _resolve_vehicles(
         self, message: TelegramMessage, profiles: list[TransportProfile]
@@ -506,6 +515,10 @@ class ProfileResolutionRepository:
                     )
 
     async def _plate_vehicle(self, plate: PlateDetection, metadata: dict[str, object]) -> Vehicle:
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"vehicle-plate:{plate.normalized_text}"},
+        )
         vehicle = await self._session.scalar(
             select(Vehicle)
             .where(Vehicle.normalized_plate == plate.normalized_text)
@@ -534,17 +547,15 @@ class ProfileResolutionRepository:
 
     async def _signature_vehicle(self, profile_id: int, metadata: dict[str, object]) -> Vehicle:
         signature = {key: metadata.get(key) for key in ("make", "model", "generation", "year")}
+        signature_key = hashlib.sha256(
+            json.dumps([profile_id, signature], sort_keys=True, default=str).encode()
+        ).hexdigest()
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"vehicle-signature:{signature_key}"},
+        )
         existing = await self._session.scalar(
-            select(Vehicle)
-            .join(VehicleObservation)
-            .where(
-                Vehicle.normalized_plate.is_(None),
-                VehicleObservation.profile_id == profile_id,
-                Vehicle.make == signature["make"],
-                Vehicle.model == signature["model"],
-                Vehicle.generation == signature["generation"],
-                Vehicle.year == signature["year"],
-            )
+            select(Vehicle).where(Vehicle.profile_signature_key == signature_key).with_for_update()
         )
         if existing:
             return existing
@@ -557,6 +568,7 @@ class ProfileResolutionRepository:
         vehicle = Vehicle(
             identity_kind="profile_signature",
             normalized_plate=None,
+            profile_signature_key=signature_key,
             **signature,
             canonical_label=" ".join(parts) or "Неопределённый автомобиль",
             first_seen_at=now,
@@ -580,19 +592,34 @@ class ProfileResolutionRepository:
         confidence: float,
     ) -> None:
         now = datetime.now(timezone.utc)
-        for profile in profiles or [None]:
-            self._session.add(
-                VehicleObservation(
+        self._session.add(
+            VehicleObservation(
+                vehicle_id=vehicle.id,
+                message_id=message.id,
+                profile_id=None,
+                source_type=source_type,
+                extracted_entity_id=entity_id,
+                plate_detection_id=plate_id,
+                confidence=confidence,
+                evidence={"message_id": message.id},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        for profile in profiles:
+            await self._session.execute(
+                insert(ProfileVehicleLinkObservation)
+                .values(
+                    profile_id=profile.id,
                     vehicle_id=vehicle.id,
                     message_id=message.id,
-                    profile_id=profile.id if profile else None,
-                    source_type=source_type,
-                    extracted_entity_id=entity_id,
-                    plate_detection_id=plate_id,
                     confidence=confidence,
-                    evidence={"message_id": message.id},
+                    evidence={"source_type": source_type},
                     created_at=now,
-                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    index_elements=["profile_id", "vehicle_id", "message_id"],
+                    set_={"confidence": confidence, "evidence": {"source_type": source_type}},
                 )
             )
 
@@ -608,18 +635,17 @@ class ProfileResolutionRepository:
             ).where(ProfileOccurrence.profile_id == profile_id)
         )
         total, active, first, last = rows.one()
-        if total:
-            await self._session.execute(
-                update(TransportProfile)
-                .where(TransportProfile.id == profile_id)
-                .values(
-                    occurrence_count=total,
-                    active_occurrence_count=active,
-                    first_seen_at=first,
-                    last_seen_at=last,
-                    updated_at=datetime.now(timezone.utc),
-                )
+        await self._session.execute(
+            update(TransportProfile)
+            .where(TransportProfile.id == profile_id)
+            .values(
+                occurrence_count=total,
+                active_occurrence_count=active,
+                first_seen_at=first or datetime.now(timezone.utc),
+                last_seen_at=last or datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
             )
+        )
 
     async def _refresh_vehicle(self, vehicle_id: int) -> None:
         total, first, last = (
@@ -631,65 +657,118 @@ class ProfileResolutionRepository:
                 ).where(VehicleObservation.vehicle_id == vehicle_id)
             )
         ).one()
-        if total:
-            await self._session.execute(
-                update(Vehicle)
-                .where(Vehicle.id == vehicle_id)
-                .values(
-                    observation_count=total,
-                    first_seen_at=first,
-                    last_seen_at=last,
-                    updated_at=datetime.now(timezone.utc),
-                )
+        await self._session.execute(
+            update(Vehicle)
+            .where(Vehicle.id == vehicle_id)
+            .values(
+                observation_count=total,
+                first_seen_at=first or datetime.now(timezone.utc),
+                last_seen_at=last or datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
             )
+        )
 
     async def _refresh_links_and_shared_vehicle(
         self, message_id: int, profile_ids: set[int]
     ) -> None:
-        now = datetime.now(timezone.utc)
+        if not profile_ids:
+            return
+        await self._session.execute(
+            delete(ProfileVehicleLink).where(ProfileVehicleLink.profile_id.in_(profile_ids))
+        )
         rows = await self._session.execute(
-            select(VehicleObservation.profile_id, VehicleObservation.vehicle_id).where(
-                VehicleObservation.message_id == message_id,
-                VehicleObservation.profile_id.is_not(None),
+            select(
+                ProfileVehicleLinkObservation.profile_id,
+                ProfileVehicleLinkObservation.vehicle_id,
+                func.count(),
+                func.min(ProfileVehicleLinkObservation.created_at),
+                func.max(ProfileVehicleLinkObservation.created_at),
+                func.max(ProfileVehicleLinkObservation.confidence),
+            )
+            .where(ProfileVehicleLinkObservation.profile_id.in_(profile_ids))
+            .group_by(
+                ProfileVehicleLinkObservation.profile_id, ProfileVehicleLinkObservation.vehicle_id
             )
         )
-        for profile_id, vehicle_id in rows:
-            await self._session.execute(
-                insert(ProfileVehicleLink)
-                .values(
+        now = datetime.now(timezone.utc)
+        for profile_id, vehicle_id, count, first, last, confidence in rows:
+            self._session.add(
+                ProfileVehicleLink(
                     profile_id=profile_id,
                     vehicle_id=vehicle_id,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                    occurrence_count=1,
-                    confidence=1.0,
-                    evidence={"message_id": message_id},
+                    first_seen_at=first,
+                    last_seen_at=last,
+                    occurrence_count=count,
+                    confidence=confidence,
+                    evidence={},
                     created_at=now,
                     updated_at=now,
                 )
-                .on_conflict_do_update(
-                    index_elements=["profile_id", "vehicle_id"],
-                    set_={
-                        "last_seen_at": now,
-                        "occurrence_count": ProfileVehicleLink.occurrence_count + 1,
-                        "updated_at": now,
-                    },
+            )
+        pairs = (
+            await self._session.execute(
+                select(
+                    ProfileVehicleLinkObservation.profile_id,
+                    ProfileVehicleLinkObservation.vehicle_id,
+                ).where(ProfileVehicleLinkObservation.message_id == message_id)
+            )
+        ).all()
+        by_vehicle: dict[int, set[int]] = {}
+        for profile_id, vehicle_id in pairs:
+            by_vehicle.setdefault(vehicle_id, set()).add(profile_id)
+        for vehicle_id, linked in by_vehicle.items():
+            for left in linked:
+                for right in linked:
+                    if left < right:
+                        await self._relation(
+                            left, right, "shared_vehicle", message_id, {"vehicle_id": vehicle_id}
+                        )
+
+    async def _refresh_relations(self, profile_ids: set[int]) -> None:
+        if not profile_ids:
+            return
+        await self._session.execute(
+            delete(ProfileRelation).where(
+                (ProfileRelation.left_profile_id.in_(profile_ids))
+                | (ProfileRelation.right_profile_id.in_(profile_ids))
+            )
+        )
+        rows = await self._session.execute(
+            select(
+                ProfileRelationObservation.left_profile_id,
+                ProfileRelationObservation.right_profile_id,
+                ProfileRelationObservation.relation_type,
+                func.count(),
+                func.min(ProfileRelationObservation.created_at),
+                func.max(ProfileRelationObservation.created_at),
+                func.max(ProfileRelationObservation.confidence),
+            )
+            .where(
+                (ProfileRelationObservation.left_profile_id.in_(profile_ids))
+                | (ProfileRelationObservation.right_profile_id.in_(profile_ids))
+            )
+            .group_by(
+                ProfileRelationObservation.left_profile_id,
+                ProfileRelationObservation.right_profile_id,
+                ProfileRelationObservation.relation_type,
+            )
+        )
+        now = datetime.now(timezone.utc)
+        for left, right, kind, count, first, last, confidence in rows:
+            self._session.add(
+                ProfileRelation(
+                    left_profile_id=left,
+                    right_profile_id=right,
+                    relation_type=kind,
+                    confidence=confidence,
+                    first_seen_at=first,
+                    last_seen_at=last,
+                    occurrence_count=count,
+                    evidence={},
+                    created_at=now,
+                    updated_at=now,
                 )
             )
-            linked = list(
-                (
-                    await self._session.scalars(
-                        select(ProfileVehicleLink.profile_id).where(
-                            ProfileVehicleLink.vehicle_id == vehicle_id
-                        )
-                    )
-                ).all()
-            )
-            for related in linked:
-                if related != profile_id:
-                    await self._relation(
-                        profile_id, related, "shared_vehicle", {"vehicle_id": vehicle_id}
-                    )
 
     async def _complete(self, job: ProfileResolutionJob) -> None:
         result = await self._session.execute(

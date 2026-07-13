@@ -12,6 +12,9 @@ from app.database.models import (
     MediaProcessingJob,
     MessageAnalysis,
     MessageAnalysisJob,
+    ProfileOccurrence,
+    ProfileResolutionJob,
+    TransportProfile,
     TelegramChat,
     TelegramMessage,
 )
@@ -21,6 +24,7 @@ from app.database.repositories import (
     MessageRepository,
 )
 from app.processing.text.analyzer import analyze_message
+from app.processing.profiles.repository import ProfileResolutionRepository
 
 pytestmark = pytest.mark.integration
 
@@ -176,3 +180,35 @@ async def test_requeued_job_rejects_stale_worker_completion(
         )
         job = await session.get(MessageAnalysisJob, stale_job.id)
         assert job is not None and job.status == "pending" and job.source_text_hash == "hash-b"
+
+
+@pytest.mark.asyncio
+async def test_profile_resolution_groups_exact_phone_idempotently(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as session:
+        await create_chat(session)
+        for message_id, text in (
+            (1, "Такси Алматы Бишкек +77020007123"),
+            (2, "Такси Алматы Бишкек Камри +7 702 000 71 23"),
+        ):
+            values = message_values(message_id)
+            values["text"] = text
+            message = await MessageRepository(session).upsert_message(values, save_edit=False)
+            await MessageAnalysisJobRepository(session).enqueue(
+                message.id, f"hash-{message_id}", "v1"
+            )
+    async with session_factory() as session:
+        repository = MessageAnalysisJobRepository(session)
+        while job := await repository.claim_next_job():
+            assert await repository.complete(job, analyze_message(job.message.text))
+    async with session_factory() as session:
+        repository = ProfileResolutionRepository(session)
+        while job := await repository.claim_next_job():
+            assert await repository.resolve(job) == "completed"
+    async with session_factory() as session:
+        assert await session.scalar(select(func.count(TransportProfile.id))) == 1
+        assert await session.scalar(select(func.count(ProfileOccurrence.id))) == 2
+        job = await session.scalar(select(ProfileResolutionJob).limit(1))
+        assert job is not None
+        assert not await ProfileResolutionRepository(session).enqueue_for_message(job.message_id)
