@@ -115,7 +115,30 @@ class ProfileRelationObservation(Base):
     message_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProfileSharedVehicleObservation(Base):
+    __tablename__ = "profile_shared_vehicle_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "left_profile_id < right_profile_id", name="ck_profile_shared_vehicle_pair"
+        ),
+    )
+    left_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_profiles.id"), primary_key=True
+    )
+    right_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("transport_profiles.id"), primary_key=True
+    )
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), primary_key=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Vehicle(Base):
@@ -165,6 +188,7 @@ class VehicleObservation(Base):
     plate_detection_id: Mapped[int | None] = mapped_column(ForeignKey("plate_detections.id"))
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -190,6 +214,7 @@ class ProfileVehicleLinkObservation(Base):
     message_id: Mapped[int] = mapped_column(ForeignKey("telegram_messages.id"), primary_key=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

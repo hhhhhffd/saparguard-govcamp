@@ -20,6 +20,7 @@ from app.database.models import (
     ProfileOccurrence,
     ProfileRelation,
     ProfileRelationObservation,
+    ProfileSharedVehicleObservation,
     ProfileResolutionConflict,
     ProfileResolutionJob,
     ProfileVehicleLink,
@@ -189,9 +190,16 @@ class ProfileResolutionRepository:
                 )
             ).all()
         )
-        await self._session.execute(
-            delete(ProfileOccurrence).where(ProfileOccurrence.message_id == message.id)
-        )
+        if message.is_deleted:
+            await self._session.execute(
+                update(ProfileOccurrence)
+                .where(ProfileOccurrence.message_id == message.id)
+                .values(source_deleted=True, updated_at=datetime.now(timezone.utc))
+            )
+        else:
+            await self._session.execute(
+                delete(ProfileOccurrence).where(ProfileOccurrence.message_id == message.id)
+            )
         await self._session.execute(
             delete(VehicleObservation).where(VehicleObservation.message_id == message.id)
         )
@@ -213,9 +221,13 @@ class ProfileResolutionRepository:
         analysis = message.analysis
         phones = [entity for entity in analysis.entities if entity.entity_type == "phone"]
         profiles: list[TransportProfile] = []
-        if analysis.message_type in PROVIDER_TYPES:
+        is_provider = not message.is_deleted and analysis.message_type in PROVIDER_TYPES
+        profile_phone_entities: dict[int, ExtractedEntity] = {}
+        if is_provider:
             for phone in phones:
-                profiles.append(await self._phone_profile(phone, message))
+                profile = await self._phone_profile(phone, message)
+                profiles.append(profile)
+                profile_phone_entities[profile.id] = phone
             if (
                 not profiles
                 and message.telegram_sender_id is not None
@@ -225,7 +237,8 @@ class ProfileResolutionRepository:
         profiles = list({profile.id: profile for profile in profiles}.values())
         now = datetime.now(timezone.utc)
         for profile in profiles:
-            method = "exact_phone" if phones else "telegram_user_id"
+            phone = profile_phone_entities.get(profile.id)
+            method = "exact_phone" if phone else "telegram_user_id"
             await self._session.execute(
                 insert(ProfileOccurrence).values(
                     profile_id=profile.id,
@@ -233,11 +246,12 @@ class ProfileResolutionRepository:
                     match_method=method,
                     confidence=1.0,
                     evidence={
-                        "entity_id": next((phone.id for phone in phones), None),
+                        "matched_phone": phone.normalized_value if phone else None,
+                        "entity_id": phone.id if phone else None,
                         "classification": analysis.message_type,
                     },
                     source_deleted=message.is_deleted,
-                    first_seen_at=now,
+                    first_seen_at=message.published_at,
                     last_resolved_at=now,
                     created_at=now,
                     updated_at=now,
@@ -255,7 +269,8 @@ class ProfileResolutionRepository:
                         await self._relation(
                             telegram.id, profile.id, "shared_sender", message.id, {}
                         )
-        await self._resolve_vehicles(message, profiles)
+        if is_provider:
+            await self._resolve_vehicles(message, profiles)
         affected_profiles = set(old_profile_ids) | {profile.id for profile in profiles}
         affected_vehicles = set(old_vehicle_ids) | set(
             (
@@ -266,13 +281,18 @@ class ProfileResolutionRepository:
                 )
             ).all()
         )
+        affected_profiles.update(await self._profiles_linked_to_vehicles(affected_vehicles))
         for profile_id in affected_profiles:
             await self._refresh_profile(profile_id)
+            await self._refresh_identifiers(profile_id)
         for vehicle_id in affected_vehicles:
             await self._refresh_vehicle(vehicle_id)
-        await self._refresh_links_and_shared_vehicle(message.id, affected_profiles)
+        await self._refresh_links(affected_profiles)
+        await self._refresh_shared_vehicle_observations(affected_vehicles)
         await self._refresh_relations(affected_profiles)
-        await self._complete(job)
+        if not await self._complete(job):
+            await self._session.rollback()
+            return "stale"
         await self._session.commit()
         return "completed"
 
@@ -322,8 +342,8 @@ class ProfileResolutionRepository:
                 profile_kind="phone",
                 canonical_label=f"Перевозчик {entity.normalized_value}",
                 status="active",
-                first_seen_at=now,
-                last_seen_at=now,
+                first_seen_at=message.published_at,
+                last_seen_at=message.published_at,
                 occurrence_count=0,
                 active_occurrence_count=0,
                 resolver_version=settings.profile_resolver_version,
@@ -341,9 +361,9 @@ class ProfileResolutionRepository:
                     normalized_value=entity.normalized_value,
                     confidence=entity.confidence,
                     source_message_id=message.id,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                    occurrence_count=1,
+                    first_seen_at=message.published_at,
+                    last_seen_at=message.published_at,
+                    occurrence_count=0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -362,57 +382,72 @@ class ProfileResolutionRepository:
         )
 
     async def _telegram_profile(self, message: TelegramMessage) -> TransportProfile:
-        existing = await self._existing_telegram_profile(message.telegram_sender_id or 0)
-        now = datetime.now(timezone.utc)
-        if existing:
-            return existing
-        profile = TransportProfile(
-            profile_kind="telegram",
-            canonical_label=f"Telegram-профиль {message.telegram_sender_id}",
-            status="active",
-            first_seen_at=now,
-            last_seen_at=now,
-            occurrence_count=0,
-            active_occurrence_count=0,
-            resolver_version=settings.profile_resolver_version,
-            created_at=now,
-            updated_at=now,
+        sender_id = message.telegram_sender_id or 0
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"profile-telegram:{sender_id}"},
         )
-        self._session.add(profile)
-        await self._session.flush()
-        self._session.add(
-            ProfileIdentifier(
-                profile_id=profile.id,
-                identifier_type="telegram_user_id",
-                identifier_role="anchor",
-                raw_value=str(message.telegram_sender_id),
-                normalized_value=str(message.telegram_sender_id),
-                confidence=1.0,
-                source_message_id=message.id,
-                first_seen_at=now,
-                last_seen_at=now,
-                occurrence_count=1,
+        existing = await self._existing_telegram_profile(sender_id)
+        now = datetime.now(timezone.utc)
+        profile = existing
+        if profile is None:
+            profile = TransportProfile(
+                profile_kind="telegram",
+                canonical_label=f"Telegram-профиль {message.telegram_sender_id}",
+                status="active",
+                first_seen_at=message.published_at,
+                last_seen_at=message.published_at,
+                occurrence_count=0,
+                active_occurrence_count=0,
+                resolver_version=settings.profile_resolver_version,
                 created_at=now,
                 updated_at=now,
             )
-        )
-        if message.sender and message.sender.username:
+            self._session.add(profile)
+            await self._session.flush()
             self._session.add(
                 ProfileIdentifier(
                     profile_id=profile.id,
-                    identifier_type="telegram_username",
-                    identifier_role="observed",
-                    raw_value=message.sender.username,
-                    normalized_value=message.sender.username.casefold(),
+                    identifier_type="telegram_user_id",
+                    identifier_role="anchor",
+                    raw_value=str(message.telegram_sender_id),
+                    normalized_value=str(message.telegram_sender_id),
                     confidence=1.0,
                     source_message_id=message.id,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                    occurrence_count=1,
+                    first_seen_at=message.published_at,
+                    last_seen_at=message.published_at,
+                    occurrence_count=0,
                     created_at=now,
                     updated_at=now,
                 )
             )
+        if message.sender and message.sender.username:
+            username = message.sender.username.casefold()
+            alias = await self._session.scalar(
+                select(ProfileIdentifier).where(
+                    ProfileIdentifier.profile_id == profile.id,
+                    ProfileIdentifier.identifier_type == "telegram_username",
+                    ProfileIdentifier.identifier_role == "observed",
+                    ProfileIdentifier.normalized_value == username,
+                )
+            )
+            if alias is None:
+                self._session.add(
+                    ProfileIdentifier(
+                        profile_id=profile.id,
+                        identifier_type="telegram_username",
+                        identifier_role="observed",
+                        raw_value=message.sender.username,
+                        normalized_value=username,
+                        confidence=1.0,
+                        source_message_id=message.id,
+                        first_seen_at=message.published_at,
+                        last_seen_at=message.published_at,
+                        occurrence_count=0,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
         return profile
 
     async def _sender_is_relay(self, sender_id: int) -> bool:
@@ -459,6 +494,11 @@ class ProfileResolutionRepository:
             message_id=message_id,
             confidence=1.0,
             evidence=evidence,
+            observed_at=(
+                await self._session.scalar(
+                    select(TelegramMessage.published_at).where(TelegramMessage.id == message_id)
+                )
+            ),
             created_at=now,
         )
         await self._session.execute(stmt.on_conflict_do_nothing())
@@ -475,12 +515,12 @@ class ProfileResolutionRepository:
             for plate in plates
             if (plate.confidence or 0) >= settings.profile_plate_min_confidence
         ]
-        if len(entities) > 1 and len(high_plates) > 1:
+        if entities and high_plates and (len(entities) != 1 or len(high_plates) != 1):
             now = datetime.now(timezone.utc)
             self._session.add(
                 ProfileResolutionConflict(
                     message_id=message.id,
-                    conflict_type="multiple_vehicles_multiple_plates",
+                    conflict_type="ambiguous_vehicle_plate_mapping",
                     status="open",
                     details={"vehicle_count": len(entities), "plate_count": len(high_plates)},
                     created_at=now,
@@ -488,7 +528,9 @@ class ProfileResolutionRepository:
                 )
             )
         if len(entities) == 1 and len(high_plates) == 1:
-            vehicle = await self._plate_vehicle(high_plates[0], entities[0].metadata_)
+            vehicle = await self._plate_vehicle(
+                high_plates[0], entities[0].metadata_, message.published_at, message.id
+            )
             await self._observe_vehicle(
                 vehicle, message, profiles, "text", entities[0].id, None, entities[0].confidence
             )
@@ -503,18 +545,26 @@ class ProfileResolutionRepository:
             )
         else:
             for plate in high_plates:
-                vehicle = await self._plate_vehicle(plate, {})
+                vehicle = await self._plate_vehicle(plate, {}, message.published_at, message.id)
                 await self._observe_vehicle(
                     vehicle, message, profiles, "alpr", None, plate.id, plate.confidence or 0
                 )
             for entity in entities:
                 for profile in profiles:
-                    vehicle = await self._signature_vehicle(profile.id, entity.metadata_)
+                    vehicle = await self._signature_vehicle(
+                        profile.id, entity.metadata_, message.published_at
+                    )
                     await self._observe_vehicle(
                         vehicle, message, [profile], "text", entity.id, None, entity.confidence
                     )
 
-    async def _plate_vehicle(self, plate: PlateDetection, metadata: dict[str, object]) -> Vehicle:
+    async def _plate_vehicle(
+        self,
+        plate: PlateDetection,
+        metadata: dict[str, object],
+        observed_at: datetime,
+        message_id: int,
+    ) -> Vehicle:
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
             {"key": f"vehicle-plate:{plate.normalized_text}"},
@@ -525,6 +575,28 @@ class ProfileResolutionRepository:
             .with_for_update()
         )
         if vehicle:
+            conflicts = {
+                key: {"existing": getattr(vehicle, key), "observed": value}
+                for key, value in metadata.items()
+                if value is not None and getattr(vehicle, key) not in (None, value)
+            }
+            if conflicts:
+                now = datetime.now(timezone.utc)
+                self._session.add(
+                    ProfileResolutionConflict(
+                        message_id=message_id,
+                        conflict_type="vehicle_identity_conflict",
+                        status="open",
+                        details={"vehicle_id": vehicle.id, "fields": conflicts},
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            else:
+                for key, value in metadata.items():
+                    if value is not None and getattr(vehicle, key) is None:
+                        setattr(vehicle, key, value)
+                vehicle.updated_at = datetime.now(timezone.utc)
             return vehicle
         now = datetime.now(timezone.utc)
         vehicle = Vehicle(
@@ -535,8 +607,8 @@ class ProfileResolutionRepository:
             generation=metadata.get("generation"),
             year=metadata.get("year"),
             canonical_label=plate.normalized_text,
-            first_seen_at=now,
-            last_seen_at=now,
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
             observation_count=0,
             created_at=now,
             updated_at=now,
@@ -545,7 +617,9 @@ class ProfileResolutionRepository:
         await self._session.flush()
         return vehicle
 
-    async def _signature_vehicle(self, profile_id: int, metadata: dict[str, object]) -> Vehicle:
+    async def _signature_vehicle(
+        self, profile_id: int, metadata: dict[str, object], observed_at: datetime
+    ) -> Vehicle:
         signature = {key: metadata.get(key) for key in ("make", "model", "generation", "year")}
         signature_key = hashlib.sha256(
             json.dumps([profile_id, signature], sort_keys=True, default=str).encode()
@@ -571,8 +645,8 @@ class ProfileResolutionRepository:
             profile_signature_key=signature_key,
             **signature,
             canonical_label=" ".join(parts) or "Неопределённый автомобиль",
-            first_seen_at=now,
-            last_seen_at=now,
+            first_seen_at=observed_at,
+            last_seen_at=observed_at,
             observation_count=0,
             created_at=now,
             updated_at=now,
@@ -602,6 +676,7 @@ class ProfileResolutionRepository:
                 plate_detection_id=plate_id,
                 confidence=confidence,
                 evidence={"message_id": message.id},
+                observed_at=message.published_at,
                 created_at=now,
                 updated_at=now,
             )
@@ -615,6 +690,7 @@ class ProfileResolutionRepository:
                     message_id=message.id,
                     confidence=confidence,
                     evidence={"source_type": source_type},
+                    observed_at=message.published_at,
                     created_at=now,
                 )
                 .on_conflict_do_update(
@@ -631,7 +707,7 @@ class ProfileResolutionRepository:
                     ProfileOccurrence.source_deleted.is_(False)
                 ),
                 func.min(ProfileOccurrence.first_seen_at),
-                func.max(ProfileOccurrence.last_resolved_at),
+                func.max(ProfileOccurrence.first_seen_at),
             ).where(ProfileOccurrence.profile_id == profile_id)
         )
         total, active, first, last = rows.one()
@@ -641,8 +717,8 @@ class ProfileResolutionRepository:
             .values(
                 occurrence_count=total,
                 active_occurrence_count=active,
-                first_seen_at=first or datetime.now(timezone.utc),
-                last_seen_at=last or datetime.now(timezone.utc),
+                first_seen_at=func.coalesce(first, TransportProfile.first_seen_at),
+                last_seen_at=func.coalesce(last, TransportProfile.last_seen_at),
                 updated_at=datetime.now(timezone.utc),
             )
         )
@@ -652,8 +728,8 @@ class ProfileResolutionRepository:
             await self._session.execute(
                 select(
                     func.count(VehicleObservation.id),
-                    func.min(VehicleObservation.created_at),
-                    func.max(VehicleObservation.created_at),
+                    func.min(VehicleObservation.observed_at),
+                    func.max(VehicleObservation.observed_at),
                 ).where(VehicleObservation.vehicle_id == vehicle_id)
             )
         ).one()
@@ -662,15 +738,69 @@ class ProfileResolutionRepository:
             .where(Vehicle.id == vehicle_id)
             .values(
                 observation_count=total,
-                first_seen_at=first or datetime.now(timezone.utc),
-                last_seen_at=last or datetime.now(timezone.utc),
+                first_seen_at=func.coalesce(first, Vehicle.first_seen_at),
+                last_seen_at=func.coalesce(last, Vehicle.last_seen_at),
                 updated_at=datetime.now(timezone.utc),
             )
         )
 
-    async def _refresh_links_and_shared_vehicle(
-        self, message_id: int, profile_ids: set[int]
-    ) -> None:
+    async def _profiles_linked_to_vehicles(self, vehicle_ids: set[int]) -> set[int]:
+        if not vehicle_ids:
+            return set()
+        return set(
+            (
+                await self._session.scalars(
+                    select(ProfileVehicleLinkObservation.profile_id)
+                    .where(ProfileVehicleLinkObservation.vehicle_id.in_(vehicle_ids))
+                    .distinct()
+                )
+            ).all()
+        )
+
+    async def _refresh_identifiers(self, profile_id: int) -> None:
+        identifiers = list(
+            (
+                await self._session.scalars(
+                    select(ProfileIdentifier).where(ProfileIdentifier.profile_id == profile_id)
+                )
+            ).all()
+        )
+        now = datetime.now(timezone.utc)
+        for identifier in identifiers:
+            statement = (
+                select(
+                    func.count(func.distinct(ProfileOccurrence.message_id)),
+                    func.min(TelegramMessage.published_at),
+                    func.max(TelegramMessage.published_at),
+                )
+                .join(TelegramMessage, TelegramMessage.id == ProfileOccurrence.message_id)
+                .where(ProfileOccurrence.profile_id == profile_id)
+            )
+            if identifier.identifier_type == "phone":
+                statement = (
+                    statement.join(
+                        MessageAnalysis, MessageAnalysis.message_id == TelegramMessage.id
+                    )
+                    .join(ExtractedEntity, ExtractedEntity.analysis_id == MessageAnalysis.id)
+                    .where(
+                        ExtractedEntity.id == ProfileOccurrence.evidence["entity_id"].as_integer(),
+                        ExtractedEntity.normalized_value == identifier.normalized_value,
+                    )
+                )
+            elif identifier.identifier_type == "telegram_user_id":
+                statement = statement.where(
+                    TelegramMessage.telegram_sender_id == int(identifier.normalized_value)
+                )
+            else:
+                continue
+            count, first, last = (await self._session.execute(statement)).one()
+            if count:
+                identifier.occurrence_count = count
+                identifier.first_seen_at = first
+                identifier.last_seen_at = last
+                identifier.updated_at = now
+
+    async def _refresh_links(self, profile_ids: set[int]) -> None:
         if not profile_ids:
             return
         await self._session.execute(
@@ -681,8 +811,8 @@ class ProfileResolutionRepository:
                 ProfileVehicleLinkObservation.profile_id,
                 ProfileVehicleLinkObservation.vehicle_id,
                 func.count(),
-                func.min(ProfileVehicleLinkObservation.created_at),
-                func.max(ProfileVehicleLinkObservation.created_at),
+                func.min(ProfileVehicleLinkObservation.observed_at),
+                func.max(ProfileVehicleLinkObservation.observed_at),
                 func.max(ProfileVehicleLinkObservation.confidence),
             )
             .where(ProfileVehicleLinkObservation.profile_id.in_(profile_ids))
@@ -705,24 +835,42 @@ class ProfileResolutionRepository:
                     updated_at=now,
                 )
             )
-        pairs = (
+
+    async def _refresh_shared_vehicle_observations(self, vehicle_ids: set[int]) -> None:
+        now = datetime.now(timezone.utc)
+        for vehicle_id in vehicle_ids:
             await self._session.execute(
-                select(
-                    ProfileVehicleLinkObservation.profile_id,
-                    ProfileVehicleLinkObservation.vehicle_id,
-                ).where(ProfileVehicleLinkObservation.message_id == message_id)
+                delete(ProfileSharedVehicleObservation).where(
+                    ProfileSharedVehicleObservation.vehicle_id == vehicle_id
+                )
             )
-        ).all()
-        by_vehicle: dict[int, set[int]] = {}
-        for profile_id, vehicle_id in pairs:
-            by_vehicle.setdefault(vehicle_id, set()).add(profile_id)
-        for vehicle_id, linked in by_vehicle.items():
-            for left in linked:
-                for right in linked:
-                    if left < right:
-                        await self._relation(
-                            left, right, "shared_vehicle", message_id, {"vehicle_id": vehicle_id}
+            rows = (
+                await self._session.execute(
+                    select(
+                        ProfileVehicleLinkObservation.profile_id,
+                        func.min(ProfileVehicleLinkObservation.observed_at),
+                        func.max(ProfileVehicleLinkObservation.observed_at),
+                        func.max(ProfileVehicleLinkObservation.confidence),
+                    )
+                    .where(ProfileVehicleLinkObservation.vehicle_id == vehicle_id)
+                    .group_by(ProfileVehicleLinkObservation.profile_id)
+                )
+            ).all()
+            for index, (left, left_first, left_last, left_confidence) in enumerate(rows):
+                for right, right_first, right_last, right_confidence in rows[index + 1 :]:
+                    self._session.add(
+                        ProfileSharedVehicleObservation(
+                            left_profile_id=min(left, right),
+                            right_profile_id=max(left, right),
+                            vehicle_id=vehicle_id,
+                            confidence=max(left_confidence, right_confidence),
+                            evidence={"vehicle_id": vehicle_id},
+                            first_seen_at=min(left_first, right_first),
+                            last_seen_at=max(left_last, right_last),
+                            created_at=now,
+                            updated_at=now,
                         )
+                    )
 
     async def _refresh_relations(self, profile_ids: set[int]) -> None:
         if not profile_ids:
@@ -739,8 +887,8 @@ class ProfileResolutionRepository:
                 ProfileRelationObservation.right_profile_id,
                 ProfileRelationObservation.relation_type,
                 func.count(),
-                func.min(ProfileRelationObservation.created_at),
-                func.max(ProfileRelationObservation.created_at),
+                func.min(ProfileRelationObservation.observed_at),
+                func.max(ProfileRelationObservation.observed_at),
                 func.max(ProfileRelationObservation.confidence),
             )
             .where(
@@ -764,13 +912,49 @@ class ProfileResolutionRepository:
                     first_seen_at=first,
                     last_seen_at=last,
                     occurrence_count=count,
-                    evidence={},
+                    evidence={"source_count": count},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        shared_rows = (
+            await self._session.execute(
+                select(
+                    ProfileSharedVehicleObservation.left_profile_id,
+                    ProfileSharedVehicleObservation.right_profile_id,
+                    ProfileSharedVehicleObservation.vehicle_id,
+                    ProfileSharedVehicleObservation.first_seen_at,
+                    ProfileSharedVehicleObservation.last_seen_at,
+                    ProfileSharedVehicleObservation.confidence,
+                ).where(
+                    (ProfileSharedVehicleObservation.left_profile_id.in_(profile_ids))
+                    | (ProfileSharedVehicleObservation.right_profile_id.in_(profile_ids))
+                )
+            )
+        ).all()
+        grouped: dict[tuple[int, int], list[tuple[int, datetime, datetime, float]]] = {}
+        for left, right, vehicle_id, first, last, confidence in shared_rows:
+            grouped.setdefault((left, right), []).append((vehicle_id, first, last, confidence))
+        for (left, right), sources in grouped.items():
+            self._session.add(
+                ProfileRelation(
+                    left_profile_id=left,
+                    right_profile_id=right,
+                    relation_type="shared_vehicle",
+                    confidence=max(source[3] for source in sources),
+                    first_seen_at=min(source[1] for source in sources),
+                    last_seen_at=max(source[2] for source in sources),
+                    occurrence_count=len(sources),
+                    evidence={
+                        "vehicle_ids": sorted(source[0] for source in sources),
+                        "source_count": len(sources),
+                    },
                     created_at=now,
                     updated_at=now,
                 )
             )
 
-    async def _complete(self, job: ProfileResolutionJob) -> None:
+    async def _complete(self, job: ProfileResolutionJob) -> bool:
         result = await self._session.execute(
             update(ProfileResolutionJob)
             .where(
@@ -787,8 +971,7 @@ class ProfileResolutionRepository:
                 lease_token=None,
             )
         )
-        if not result.rowcount:
-            raise RuntimeError("Profile resolution lease expired")
+        return bool(result.rowcount)
 
     async def fail(self, job: ProfileResolutionJob, error: str) -> bool:
         terminal = job.attempts >= settings.profile_job_max_attempts
