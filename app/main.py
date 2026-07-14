@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import chats, collector, graph, media, messages, profiles, stats
 from app.core.config import settings
+from app.database.migration_check import require_current_database_revision
 from app.database.session import close_database, engine
 from app.core.logging import configure_logging
 from app.web.routes import router as web_router
@@ -21,10 +22,12 @@ async def lifespan(_: FastAPI):
     configure_logging(settings)
     logger.info("Starting API application")
     try:
-        async with engine.connect():
-            logger.info("Connected to PostgreSQL")
+        await require_current_database_revision(engine)
+        logger.info("PostgreSQL schema matches the Alembic head")
     except Exception:
-        logger.exception("PostgreSQL connection check failed")
+        logger.exception("Database startup validation failed")
+        await close_database()
+        raise
     yield
     await close_database()
     logger.info("API application stopped")

@@ -4,8 +4,9 @@ import asyncio
 import logging
 
 from app.core.config import settings
+from app.database.migration_check import require_current_database_revision
 from app.database.repositories import MessageAnalysisJobRepository
-from app.database.session import SessionFactory
+from app.database.session import SessionFactory, engine
 from app.processing.text.analyzer import analyze_message
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ async def process_one_job() -> bool:
 
 
 async def run_worker() -> None:
+    await require_current_database_revision(engine)
+    logger.info("Database schema matches the Alembic head")
     last_recovery = 0.0
     async with SessionFactory() as session:
         recovered = await MessageAnalysisJobRepository(session).recover_stale_jobs(

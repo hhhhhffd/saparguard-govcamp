@@ -4,7 +4,8 @@ import asyncio
 import logging
 
 from app.core.config import settings
-from app.database.session import SessionFactory
+from app.database.migration_check import require_current_database_revision
+from app.database.session import SessionFactory, engine
 from app.processing.profiles.resolver import ProfileResolver
 from app.processing.profiles.repository import ProfileResolutionRepository
 
@@ -28,6 +29,8 @@ async def process_one_job() -> bool:
 
 
 async def run_worker() -> None:
+    await require_current_database_revision(engine)
+    logger.info("Database schema matches the Alembic head")
     last_recovery = 0.0
     while True:
         now = asyncio.get_running_loop().time()

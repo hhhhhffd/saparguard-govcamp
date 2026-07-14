@@ -10,6 +10,8 @@ from app.collector.client import authorize_client, build_client
 from app.collector.handlers import handle_deleted_message, handle_edited_message, handle_new_message
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.database.migration_check import require_current_database_revision
+from app.database.session import engine
 from app.processing.media.worker import run_media_worker
 from app.collector.sync import synchronize_configured_sources
 
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 async def run() -> None:
     """Run an independent, reconnecting Telethon collector process."""
     configure_logging(settings)
+    await require_current_database_revision(engine)
+    logger.info("Database schema matches the Alembic head")
     client = build_client(settings)
     client.add_event_handler(handle_new_message, events.NewMessage())
     client.add_event_handler(handle_edited_message, events.MessageEdited())

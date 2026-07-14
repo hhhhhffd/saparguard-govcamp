@@ -25,6 +25,7 @@ from app.database.models import (
     MediaProcessingJob,
     PlateDetection,
     ProfileResolutionJob,
+    TelegramChat,
     TelegramMessage,
 )
 
@@ -163,8 +164,6 @@ async def select_review_queue(
         predicates.append(TelegramMessage.text.is_not(None))
         predicates.append(TelegramMessage.text != "")
     if filters.source_id is not None:
-        from app.database.models import TelegramChat
-
         predicates.append(TelegramChat.id == filters.source_id)
     if filters.date_from:
         predicates.append(TelegramMessage.published_at >= filters.date_from)

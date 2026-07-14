@@ -226,6 +226,18 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
             select(func.count(MediaProcessingJob.id)).where(MediaProcessingJob.status == "failed")
         )
         or 0,
+        "resolver_pending": await session.scalar(
+            select(func.count(ProfileResolutionJob.id)).where(
+                ProfileResolutionJob.status == "pending"
+            )
+        )
+        or 0,
+        "resolver_failed": await session.scalar(
+            select(func.count(ProfileResolutionJob.id)).where(
+                ProfileResolutionJob.status == "failed"
+            )
+        )
+        or 0,
     }
     return templates.TemplateResponse(
         request,
@@ -583,10 +595,15 @@ async def graph_page(
             )
         ).all()
     )
+    relationship_count = await session.scalar(select(func.count(ProfileRelation.id))) or 0
     return templates.TemplateResponse(
         request,
         "pages/graph.html",
-        {"profiles": profiles, "display_timezone": settings.display_timezone},
+        {
+            "profiles": profiles,
+            "relationship_count": relationship_count,
+            "display_timezone": settings.display_timezone,
+        },
     )
 
 

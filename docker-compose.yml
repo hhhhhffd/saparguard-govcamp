@@ -13,6 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
   migrate:
+    image: ${APP_IMAGE:-tg-channel-parser:local}
     build: .
     env_file:
       - path: .env
@@ -24,7 +25,7 @@ services:
       postgres:
         condition: service_healthy
   api:
-    build: .
+    image: ${APP_IMAGE:-tg-channel-parser:local}
     env_file:
       - path: .env
         required: false
@@ -40,7 +41,7 @@ services:
       migrate:
         condition: service_completed_successfully
   collector:
-    build: .
+    image: ${APP_IMAGE:-tg-channel-parser:local}
     env_file:
       - path: .env
         required: false
@@ -58,7 +59,7 @@ services:
       migrate:
         condition: service_completed_successfully
   analysis-worker:
-    build: .
+    image: ${APP_IMAGE:-tg-channel-parser:local}
     env_file:
       - path: .env
         required: false
@@ -69,7 +70,7 @@ services:
       migrate:
         condition: service_completed_successfully
   profile-worker:
-    build: .
+    image: ${APP_IMAGE:-tg-channel-parser:local}
     env_file:
       - path: .env
         required: false
