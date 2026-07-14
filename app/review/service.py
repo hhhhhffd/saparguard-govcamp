@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -136,6 +136,20 @@ def _entity_exists(entity_type: str):
     )
 
 
+def _text_group(text: str | None) -> tuple[str, str]:
+    value = (text or "").casefold()
+    text_without_phones = re.sub(r"\+?\d[\d\s()./\-]{7,}\d", "[phone]", value)
+    normalized = " ".join(re.sub(r"[^\w\s]", " ", text_without_phones).split())
+    script = (
+        "cyrillic"
+        if re.search(r"[а-яёәіңғүұқөһ]", value)
+        else "latin"
+        if re.search(r"[a-z]", value)
+        else "other"
+    )
+    return script, sha256(normalized.encode("utf-8")).hexdigest()[:12]
+
+
 async def select_review_queue(
     session: AsyncSession, filters: ReviewFilters, *, limit: int, seed: int
 ) -> list[int]:
@@ -197,6 +211,22 @@ async def select_review_queue(
                 MessageAnalysis.message_type,
                 MessageAnalysis.classification_confidence,
                 TelegramMessage.text,
+                select(func.count(ExtractedEntity.id))
+                .where(
+                    ExtractedEntity.analysis_id == MessageAnalysis.id,
+                    ExtractedEntity.entity_type == "phone",
+                )
+                .scalar_subquery(),
+                _entity_exists("vehicle"),
+                exists(
+                    select(MessageRoute.id).where(MessageRoute.analysis_id == MessageAnalysis.id)
+                ),
+                exists(select(MediaFile.id).where(MediaFile.message_id == TelegramMessage.id)),
+                exists(
+                    select(PlateDetection.id)
+                    .join(MediaFile)
+                    .where(MediaFile.message_id == TelegramMessage.id)
+                ),
             )
             .outerjoin(MessageAnalysis)
             .outerjoin(
@@ -216,7 +246,18 @@ async def select_review_queue(
 def stratified_sample(rows: list[object], *, limit: int, seed: int) -> list[int]:
     """Sample one item per source/type/confidence/length stratum before repeating."""
     buckets: dict[tuple[object, ...], list[int]] = defaultdict(list)
-    for message_id, source, message_type, confidence, text in rows:
+    for (
+        message_id,
+        source,
+        message_type,
+        confidence,
+        text,
+        phone_count,
+        has_vehicle,
+        has_route,
+        has_media,
+        has_plate,
+    ) in rows:
         confidence_band = (
             "none"
             if confidence is None
@@ -229,20 +270,41 @@ def stratified_sample(rows: list[object], *, limit: int, seed: int) -> list[int]
         length_band = (
             "short" if len(text or "") < 80 else "long" if len(text or "") > 500 else "medium"
         )
-        buckets[(source, message_type or "unanalysed", confidence_band, length_band)].append(
-            message_id
-        )
+        script_group, duplicate_group = _text_group(text)
+        phone_band = "0" if not phone_count else "1" if phone_count == 1 else "2+"
+        buckets[
+            (
+                source,
+                message_type or "unanalysed",
+                confidence_band,
+                length_band,
+                phone_band,
+                bool(has_route),
+                bool(has_vehicle),
+                bool(has_media),
+                bool(has_plate),
+                script_group,
+                duplicate_group,
+            )
+        ].append(message_id)
     rng = random.Random(seed)
     for values in buckets.values():
         values.sort()
         rng.shuffle(values)
     selected: list[int] = []
     while buckets and len(selected) < limit:
-        for key in sorted(list(buckets), key=str):
+        seen_sources: set[object] = set()
+        ordered_keys = sorted(list(buckets), key=str)
+        for key in ordered_keys:
+            if key[0] in seen_sources:
+                continue
             if buckets[key] and len(selected) < limit:
                 selected.append(buckets[key].pop())
+                seen_sources.add(key[0])
             if not buckets[key]:
                 del buckets[key]
+        if not seen_sources:
+            break
     return selected
 
 

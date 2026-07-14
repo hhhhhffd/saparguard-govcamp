@@ -20,6 +20,7 @@ from app.database.models import (
     ProfileOccurrence,
     ProfileRelation,
     ProfileResolutionConflict,
+    ProfileResolutionJob,
     ProfileVehicleLink,
     MessageAnnotation,
     TelegramChat,
@@ -608,6 +609,13 @@ async def quality_page(
         )
         or 0
     )
+    draft = (
+        await session.scalar(
+            select(func.count(MessageAnnotation.id)).where(MessageAnnotation.status == "draft")
+        )
+        or 0
+    )
+    annotated = reviewed + skipped + draft
     human_report = load_latest_report(Path("evaluation/local-reviewed/reports"))
     return templates.TemplateResponse(
         request,
@@ -618,30 +626,58 @@ async def quality_page(
             "coverage": {
                 "total": total,
                 "text_processed": await session.scalar(select(func.count(MessageAnalysis.id))) or 0,
+                "text_pending": await session.scalar(
+                    select(func.count(MessageAnalysisJob.id)).where(
+                        MessageAnalysisJob.status == "pending"
+                    )
+                )
+                or 0,
+                "text_failed": await session.scalar(
+                    select(func.count(MessageAnalysisJob.id)).where(
+                        MessageAnalysisJob.status == "failed"
+                    )
+                )
+                or 0,
                 "media_processed": await session.scalar(
-                    select(func.count(MediaProcessingJob.id)).where(
+                    select(func.count(func.distinct(MediaProcessingJob.message_id))).where(
                         MediaProcessingJob.status == "completed"
                     )
                 )
                 or 0,
-                "resolver_processed": await session.scalar(select(func.count(ProfileOccurrence.id)))
+                "media_pending": await session.scalar(
+                    select(func.count(func.distinct(MediaProcessingJob.message_id))).where(
+                        MediaProcessingJob.status == "pending"
+                    )
+                )
                 or 0,
-                "pending": (
+                "media_failed": await session.scalar(
+                    select(func.count(func.distinct(MediaProcessingJob.message_id))).where(
+                        MediaProcessingJob.status == "failed"
+                    )
+                )
+                or 0,
+                "resolver_processed": await session.scalar(
+                    select(func.count(func.distinct(ProfileOccurrence.message_id)))
+                )
+                or 0,
+                "resolver_pending": (
                     await session.scalar(
-                        select(func.count(MessageAnalysisJob.id)).where(
-                            MessageAnalysisJob.status == "pending"
+                        select(func.count(ProfileResolutionJob.id)).where(
+                            ProfileResolutionJob.status == "pending"
                         )
                     )
                     or 0
                 ),
-                "failed": (
+                "resolver_failed": (
                     await session.scalar(
-                        select(func.count(MessageAnalysisJob.id)).where(
-                            MessageAnalysisJob.status == "failed"
+                        select(func.count(ProfileResolutionJob.id)).where(
+                            ProfileResolutionJob.status == "failed"
                         )
                     )
                     or 0
                 ),
+                "unreviewed": max(total - annotated, 0),
+                "draft": draft,
                 "reviewed": reviewed,
                 "skipped": skipped,
                 "reviewed_share": reviewed / total if total else None,
@@ -675,6 +711,9 @@ async def review_page(
     include_empty: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
+    filter_query = urlencode(
+        {key: value for key, value in request.query_params.items() if key not in {"ids", "index"}}
+    )
     queue = [int(value) for value in ids.split(",") if value.isdigit()] if ids else []
     if not queue:
         queue = await select_review_queue(
@@ -712,7 +751,7 @@ async def review_page(
         )
     index = min(max(index, 0), len(queue) - 1)
     return await review_message_page(
-        request, queue[index], ",".join(map(str, queue)), index, session
+        request, queue[index], ",".join(map(str, queue)), index, session, filter_query
     )
 
 
@@ -723,6 +762,7 @@ async def review_message_page(
     ids: str | None = None,
     index: int = 0,
     session: AsyncSession = Depends(get_session),
+    filter_query: str | None = None,
 ) -> HTMLResponse:
     message = await get_review_message(session, message_id)
     if message is None:
@@ -731,6 +771,9 @@ async def review_message_page(
     if message_id not in queue:
         queue.insert(0, message_id)
     index = queue.index(message_id) if message_id in queue else index
+    filter_query = filter_query or urlencode(
+        {key: value for key, value in request.query_params.items() if key not in {"ids", "index"}}
+    )
     return templates.TemplateResponse(
         request,
         "pages/review.html",
@@ -738,6 +781,7 @@ async def review_message_page(
             "message": message,
             "queue": queue,
             "queue_ids": ",".join(map(str, queue)),
+            "filter_query": filter_query,
             "index": index,
             "annotation_stale": bool(
                 message.annotation and annotation_is_stale(message.annotation, message.text)

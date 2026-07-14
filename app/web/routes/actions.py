@@ -103,6 +103,7 @@ async def save_review(
     comment: str | None = Form(default=None),
     ids: str = Form(default=""),
     index: int = Form(default=0),
+    return_query: str = Form(default=""),
     session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
     try:
@@ -127,8 +128,9 @@ async def save_review(
     queue = [int(value) for value in ids.split(",") if value.isdigit()]
     if queue:
         next_index = min(index + 1, len(queue) - 1)
+        suffix = f"&{return_query}" if return_query else ""
         return RedirectResponse(
-            f"/review/{queue[next_index]}?ids={ids}&index={next_index}", status_code=303
+            f"/review/{queue[next_index]}?ids={ids}&index={next_index}{suffix}", status_code=303
         )
     return RedirectResponse(f"/review/{message_id}", status_code=303)
 

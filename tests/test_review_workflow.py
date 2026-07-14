@@ -68,9 +68,9 @@ def test_entity_metric_is_not_reported_for_empty_sample() -> None:
 
 def test_stratified_sampling_is_reproducible_and_balanced() -> None:
     rows = [
-        (1, 10, "driver_offer", 0.9, "short"),
-        (2, 10, "driver_offer", 0.9, "another"),
-        (3, 11, "passenger_request", 0.2, "x" * 600),
+        (1, 10, "driver_offer", 0.9, "short", 1, False, False, False, False),
+        (2, 10, "driver_offer", 0.9, "another", 2, False, False, False, False),
+        (3, 11, "passenger_request", 0.2, "x" * 600, 0, False, False, False, False),
     ]
     first = stratified_sample(rows, limit=2, seed=42)
     assert first == stratified_sample(rows, limit=2, seed=42)
