@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import chats, collector, media, messages, profiles, stats
+from app.api.routes import chats, collector, graph, media, messages, profiles, stats
 from app.core.config import settings
 from app.database.session import close_database, engine
 from app.core.logging import configure_logging
 from app.web.routes import router as web_router
+from app.web.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,15 @@ app.include_router(profiles.vehicles_router, prefix="/api")
 app.include_router(media.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(collector.router, prefix="/api")
+app.include_router(graph.router, prefix="/api")
 
 
 @app.middleware("http")
 async def add_web_security_headers(request: Request, call_next):
     """Apply strict headers only to server-rendered UI, preserving Swagger compatibility."""
+    request.state.locale = request.cookies.get("saparguard_locale", DEFAULT_LOCALE)
+    if request.state.locale not in SUPPORTED_LOCALES:
+        request.state.locale = DEFAULT_LOCALE
     response = await call_next(request)
     excluded_paths = ("/api", "/docs", "/redoc", "/openapi.json", "/static", "/health")
     if request.url.path.startswith(excluded_paths):

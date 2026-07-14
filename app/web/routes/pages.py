@@ -5,19 +5,28 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.database.models import (
+    MessageAnalysis,
+    MessageAnalysisJob,
+    MessageRoute,
+    MediaProcessingJob,
+    PlateDetection,
     ProfileIdentifier,
     ProfileOccurrence,
+    ProfileRelation,
+    ProfileResolutionConflict,
     ProfileVehicleLink,
     TelegramChat,
     TelegramMessage,
     TransportProfile,
     Vehicle,
+    VehicleObservation,
 )
+from app.analytics.profile_scores import scores_for_profiles
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
 from app.web.templating import templates
@@ -89,6 +98,10 @@ async def message_page_context(
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
     now = datetime.now(timezone.utc)
+    processed = await session.scalar(select(func.count(MessageAnalysis.id))) or 0
+    total_messages = await session.scalar(select(func.count(TelegramMessage.id))) or 0
+    profile_ids = list((await session.scalars(select(TransportProfile.id).limit(250))).all())
+    scores = await scores_for_profiles(session, profile_ids, generated_at=now)
     stats = {
         "active_sources": (
             await session.scalar(
@@ -97,7 +110,7 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
         )
         or 0,
         "total_sources": await session.scalar(select(func.count(TelegramChat.id))) or 0,
-        "total_messages": await session.scalar(select(func.count(TelegramMessage.id))) or 0,
+        "total_messages": total_messages,
         "messages_last_24_hours": (
             await session.scalar(
                 select(func.count(TelegramMessage.id)).where(
@@ -108,10 +121,34 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
         or 0,
         "last_message_at": await session.scalar(select(func.max(TelegramMessage.published_at))),
     }
+    activity = []
+    for day_offset in range(6, -1, -1):
+        day_start = (now - timedelta(days=day_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        received = await session.scalar(select(func.count(TelegramMessage.id)).where(TelegramMessage.published_at >= day_start, TelegramMessage.published_at < day_end)) or 0
+        analyzed = await session.scalar(select(func.count(MessageAnalysis.id)).join(TelegramMessage).where(TelegramMessage.published_at >= day_start, TelegramMessage.published_at < day_end)) or 0
+        updated = await session.scalar(select(func.count(ProfileOccurrence.id)).where(ProfileOccurrence.first_seen_at >= day_start, ProfileOccurrence.first_seen_at < day_end)) or 0
+        activity.append({"date": day_start, "received": received, "processed": analyzed, "profiles": updated})
+    top_profiles = list((await session.scalars(select(TransportProfile).where(TransportProfile.id.in_(profile_ids)))).all())
+    top_profiles.sort(key=lambda profile: (-scores[profile.id]["score"], -profile.id))
+    distribution = (await session.execute(select(MessageAnalysis.message_type, func.count()).group_by(MessageAnalysis.message_type).order_by(func.count().desc()))).all()
+    routes = (await session.execute(select(MessageRoute.normalized_origin, MessageRoute.normalized_destination, func.count(func.distinct(MessageRoute.analysis_id)), func.count(func.distinct(ProfileOccurrence.profile_id))).join(MessageAnalysis).join(TelegramMessage).outerjoin(ProfileOccurrence, ProfileOccurrence.message_id == TelegramMessage.id).where(TelegramMessage.published_at >= now - timedelta(days=7)).group_by(MessageRoute.normalized_origin, MessageRoute.normalized_destination).order_by(func.count(func.distinct(MessageRoute.analysis_id)).desc()).limit(8))).all()
+    recent_vehicles = (await session.execute(select(Vehicle, VehicleObservation).join(VehicleObservation).order_by(VehicleObservation.observed_at.desc()).limit(8))).all()
+    jobs = {
+        "text_pending": await session.scalar(select(func.count(MessageAnalysisJob.id)).where(MessageAnalysisJob.status == "pending")) or 0,
+        "text_failed": await session.scalar(select(func.count(MessageAnalysisJob.id)).where(MessageAnalysisJob.status == "failed")) or 0,
+        "media_pending": await session.scalar(select(func.count(MediaProcessingJob.id)).where(MediaProcessingJob.status == "pending")) or 0,
+        "media_failed": await session.scalar(select(func.count(MediaProcessingJob.id)).where(MediaProcessingJob.status == "failed")) or 0,
+    }
     return templates.TemplateResponse(
         request,
         "pages/dashboard.html",
-        {"stats": stats, "display_timezone": settings.display_timezone},
+        {"stats": stats, "processed_share": round(processed / total_messages * 100) if total_messages else 0,
+         "profile_count": len(profile_ids), "vehicle_count": await session.scalar(select(func.count(Vehicle.id))) or 0,
+         "plate_count": await session.scalar(select(func.count(PlateDetection.id))) or 0,
+         "high_score_count": sum(item["score"] >= 50 for item in scores.values()), "scores": scores,
+         "activity": activity, "distribution": distribution, "routes": routes, "top_profiles": top_profiles[:10],
+         "recent_vehicles": recent_vehicles, "jobs": jobs, "display_timezone": settings.display_timezone},
     )
 
 
@@ -169,6 +206,10 @@ async def profiles_page(
     plate: str | None = None,
     vehicle: str | None = None,
     has_conflicts: bool | None = None,
+    query: str | None = None,
+    score_min: int | None = None,
+    score_max: int | None = None,
+    score_level: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     filters = []
@@ -197,13 +238,14 @@ async def profiles_page(
         if vehicle:
             vehicle_query = vehicle_query.where(Vehicle.canonical_label.ilike(f"%{vehicle}%"))
         filters.append(TransportProfile.id.in_(vehicle_query))
+    if query:
+        filters.append(TransportProfile.canonical_label.ilike(f"%{query}%"))
     profiles = list(
         (
             await session.scalars(
                 select(TransportProfile)
                 .where(*filters)
-                .order_by(TransportProfile.last_seen_at.desc())
-                .limit(100)
+                .order_by(TransportProfile.last_seen_at.desc()).limit(250)
             )
         ).all()
     )
@@ -223,11 +265,15 @@ async def profiles_page(
     by_profile: dict[int, list[tuple[str, str]]] = {profile.id: [] for profile in profiles}
     for profile_id, identifier_type, value in identifiers:
         by_profile[profile_id].append((identifier_type, value))
+    scores = await scores_for_profiles(session, [profile.id for profile in profiles], generated_at=datetime.now(timezone.utc))
+    profiles = [profile for profile in profiles if (score_min is None or scores[profile.id]["score"] >= score_min) and (score_max is None or scores[profile.id]["score"] <= score_max) and (score_level is None or scores[profile.id]["level"] == score_level)]
+    profiles.sort(key=lambda profile: (-scores[profile.id]["score"], -profile.id))
     return templates.TemplateResponse(
         request,
         "pages/profiles.html",
         {
             "profiles": profiles,
+            "scores": scores,
             "identifiers": by_profile,
             "filters": {
                 "phone": phone or "",
@@ -235,6 +281,7 @@ async def profiles_page(
                 "plate": plate or "",
                 "vehicle": vehicle or "",
                 "has_conflicts": has_conflicts,
+                "query": query or "", "score_min": score_min or "", "score_max": score_max or "", "score_level": score_level or "",
             },
             "display_timezone": settings.display_timezone,
         },
@@ -277,6 +324,21 @@ async def profile_page(
         .scalars()
         .all()
     )
+    scores = await scores_for_profiles(session, [profile_id], generated_at=datetime.now(timezone.utc))
+    relations = list((await session.scalars(select(ProfileRelation).where(or_(ProfileRelation.left_profile_id == profile_id, ProfileRelation.right_profile_id == profile_id)))).all())
+    conflicts = list(
+        (
+            await session.scalars(
+                select(ProfileResolutionConflict).where(
+                    ProfileResolutionConflict.message_id.in_(
+                        select(ProfileOccurrence.message_id).where(
+                            ProfileOccurrence.profile_id == profile_id
+                        )
+                    )
+                )
+            )
+        ).all()
+    )
     return templates.TemplateResponse(
         request,
         "pages/profile_detail.html",
@@ -285,9 +347,20 @@ async def profile_page(
             "identifiers": identifiers,
             "occurrences": occurrences,
             "vehicles": vehicles,
+            "priority": scores[profile_id], "relations": relations, "conflicts": conflicts,
             "display_timezone": settings.display_timezone,
         },
     )
+
+
+@router.get("/vehicles", response_class=HTMLResponse)
+async def vehicles_page(request: Request, query: str | None = None, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    statement = select(Vehicle).order_by(Vehicle.last_seen_at.desc()).limit(100)
+    if query:
+        statement = statement.where(or_(Vehicle.normalized_plate.ilike(f"%{query}%"), Vehicle.canonical_label.ilike(f"%{query}%"), Vehicle.make.ilike(f"%{query}%"), Vehicle.model.ilike(f"%{query}%")))
+    vehicles = list((await session.scalars(statement)).all())
+    profile_counts = dict((await session.execute(select(ProfileVehicleLink.vehicle_id, func.count()).where(ProfileVehicleLink.vehicle_id.in_([vehicle.id for vehicle in vehicles])).group_by(ProfileVehicleLink.vehicle_id))).all()) if vehicles else {}
+    return templates.TemplateResponse(request, "pages/vehicles.html", {"vehicles": vehicles, "profile_counts": profile_counts, "query": query or "", "display_timezone": settings.display_timezone})
 
 
 @router.get("/vehicles/{vehicle_id}", response_class=HTMLResponse)
@@ -299,8 +372,22 @@ async def vehicle_page(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Vehicle not found")
+    observations = (await session.execute(select(VehicleObservation, TelegramMessage).join(TelegramMessage).where(VehicleObservation.vehicle_id == vehicle_id).order_by(VehicleObservation.observed_at.desc()).limit(100))).all()
+    profiles = (await session.execute(select(TransportProfile, ProfileVehicleLink).join(ProfileVehicleLink).where(ProfileVehicleLink.vehicle_id == vehicle_id))).all()
     return templates.TemplateResponse(
         request,
         "pages/vehicle_detail.html",
-        {"vehicle": vehicle, "display_timezone": settings.display_timezone},
+        {"vehicle": vehicle, "observations": observations, "profiles": profiles, "display_timezone": settings.display_timezone},
     )
+
+
+@router.get("/graph", response_class=HTMLResponse)
+async def graph_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    profiles = list((await session.scalars(select(TransportProfile).order_by(TransportProfile.last_seen_at.desc()).limit(50))).all())
+    return templates.TemplateResponse(request, "pages/graph.html", {"profiles": profiles, "display_timezone": settings.display_timezone})
+
+
+@router.get("/quality", response_class=HTMLResponse)
+async def quality_page(request: Request) -> HTMLResponse:
+    from app.evaluation.report import load_latest_report
+    return templates.TemplateResponse(request, "pages/quality.html", {"report": load_latest_report(), "display_timezone": settings.display_timezone})

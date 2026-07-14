@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select
@@ -20,6 +20,7 @@ from app.database.models import (
     VehicleObservation,
 )
 from app.database.session import get_session
+from app.analytics.profile_scores import scores_for_profiles
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 vehicles_router = APIRouter(prefix="/vehicles", tags=["vehicles"])
@@ -65,6 +66,10 @@ async def list_profiles(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     has_conflicts: bool | None = None,
+    score_min: int | None = Query(None, ge=0, le=100),
+    score_max: int | None = Query(None, ge=0, le=100),
+    score_level: str | None = None,
+    sort: str | None = None,
     limit: int = Query(50, ge=1, le=100),
     cursor: int | None = None,
     session: AsyncSession = Depends(get_session),
@@ -188,18 +193,31 @@ async def list_profiles(
     for profile_id, identifier_type, value in identifiers:
         if identifier_type in by_profile[profile_id]:
             by_profile[profile_id][identifier_type].append(value)
-    return {
-        "items": [
-            profile_summary(
+    scores = await scores_for_profiles(session, ids, generated_at=datetime.now(timezone.utc))
+    items = [
+        {
+            **profile_summary(
                 profile,
                 by_profile[profile.id]["phone"],
                 by_profile[profile.id]["telegram_user_id"],
                 vehicle_counts.get(profile.id, 0),
                 relation_counts.get(profile.id, 0),
                 conflicts,
-            )
-            for profile, conflicts in rows[:limit]
-        ],
+            ),
+            "priority": scores[profile.id],
+        }
+        for profile, conflicts in rows[:limit]
+    ]
+    if score_min is not None:
+        items = [item for item in items if item["priority"]["score"] >= score_min]
+    if score_max is not None:
+        items = [item for item in items if item["priority"]["score"] <= score_max]
+    if score_level:
+        items = [item for item in items if item["priority"]["level"] == score_level]
+    if sort == "score_desc":
+        items.sort(key=lambda item: (-item["priority"]["score"], -item["id"]))
+    return {
+        "items": items,
         "next_cursor": profiles[-1].id if len(rows) > limit and profiles else None,
         "has_more": len(rows) > limit,
     }
@@ -270,6 +288,7 @@ async def get_profile(
             .group_by(MessageRoute.normalized_origin, MessageRoute.normalized_destination)
         )
     ).all()
+    priority = (await scores_for_profiles(session, [profile_id], generated_at=datetime.now(timezone.utc)))[profile_id]
     return {
         "profile": model_data(
             profile,
@@ -285,6 +304,7 @@ async def get_profile(
                 "resolver_version",
             ),
         ),
+        "priority": priority,
         "identifiers": [
             model_data(
                 item,

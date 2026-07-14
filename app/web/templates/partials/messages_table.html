@@ -1,16 +1,1 @@
-{% from "components/empty_state.html" import empty_state %}
-{% if messages %}
-<div class="overflow-x-auto rounded border border-slate-200 bg-white">
-  <table class="w-full table-fixed text-left text-sm">
-    <colgroup>
-      <col class="w-1/6"><col class="w-1/6"><col class="w-1/6"><col class="w-1/6"><col class="w-1/6"><col class="w-1/6">
-    </colgroup>
-    <thead class="border-b bg-slate-50 text-slate-600"><tr><th class="p-3">Дата</th><th class="p-3">Чат</th><th class="p-3">Отправитель</th><th class="p-3">Текст</th><th class="p-3">Тип</th><th class="p-3">Статус</th></tr></thead>
-    <tbody>
-      {% include "partials/message_rows.html" %}
-    </tbody>
-  </table>
-</div>
-{% else %}
-{{ empty_state('Сообщения по заданным фильтрам не найдены.') }}
-{% endif %}
+<table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('messages.type') }}</th><th>{{ t('messages.route') }}</th><th>{{ t('messages.contact') }}</th><th>{{ t('messages.vehicle') }}</th><th>{{ t('common.source') }}</th><th>{{ t('common.confidence') }}</th><th>{{ t('messages.processing') }}</th><th></th></tr></thead><tbody>{% include "partials/message_rows.html" %}</tbody></table>{% include "partials/pagination.html" %}

@@ -161,6 +161,8 @@ class MessageRepository:
                 selectinload(TelegramMessage.chat),
                 selectinload(TelegramMessage.sender),
                 selectinload(TelegramMessage.analysis),
+                selectinload(TelegramMessage.analysis).selectinload(MessageAnalysis.entities),
+                selectinload(TelegramMessage.analysis).selectinload(MessageAnalysis.routes),
                 selectinload(TelegramMessage.analysis_job),
             )
             .where(where_clause)

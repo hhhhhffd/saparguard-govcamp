@@ -1,0 +1,6 @@
+{% macro score_badge(priority) -%}
+<span class="score-badge score-{{ priority.level }}" title="{{ t('profiles.priority') }}: {{ priority.score }}/100">{{ priority.score }} · {{ t('score.' ~ priority.level) }}</span>
+{%- endmacro %}
+{% macro score_breakdown(priority) -%}
+<section class="data-card score-panel"><div class="section-heading"><div><p class="eyebrow">{{ t('profiles.priority') }}</p><h2>{{ priority.score }} / 100</h2></div>{{ score_badge(priority) }}</div><div class="score-progress"><span style="width: {{ priority.score }}%"></span></div><p class="muted">{{ t('profiles.score_notice') }}</p><ul class="factor-list">{% for factor in priority.factors %}<li><div><strong>{{ t('score.factor.' ~ factor.code) if t('score.factor.' ~ factor.code) != 'score.factor.' ~ factor.code else factor.code }}</strong><small>{{ factor.evidence }}</small></div><b>{{ factor.points }}/{{ factor.max_points }}</b></li>{% endfor %}</ul></section>
+{%- endmacro %}

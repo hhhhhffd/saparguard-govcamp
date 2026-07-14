@@ -1,0 +1,4 @@
+{"text":"Такси Алматы Бишкек +77020007123","expected":"driver_offer"}
+{"text":"Ищу такси Алматы Бишкек","expected":"passenger_request"}
+{"text":"Доставить посылку в Бишкек","expected":"parcel_request"}
+{"text":"Посылка алам Алматы Бишкек","expected":"parcel_offer"}

@@ -1,16 +1,1 @@
-{% extends "layouts/base.html" %}
-{% block title %}Профили — SaparGuard{% endblock %}
-{% block content %}
-<h1 class="mb-6 text-2xl font-semibold">Наблюдаемые профили перевозчиков</h1>
-<form method="get" class="mb-6 grid gap-3 md:grid-cols-4">
-  <input name="phone" value="{{ filters.phone }}" placeholder="Телефон" class="rounded border p-2">
-  <input name="telegram_user_id" value="{{ filters.telegram_user_id }}" placeholder="Telegram ID" class="rounded border p-2">
-  <input name="plate" value="{{ filters.plate }}" placeholder="Госномер" class="rounded border p-2">
-  <input name="vehicle" value="{{ filters.vehicle }}" placeholder="Машина" class="rounded border p-2">
-  <button class="rounded bg-slate-900 p-2 text-white">Фильтровать</button>
-</form>
-<p class="mb-4 text-sm text-slate-600">Профили построены по публичным объявлениям и не подтверждают личность человека или право собственности на автомобиль.</p>
-<div class="overflow-x-auto rounded border"><table class="w-full text-sm"><thead><tr><th>Профиль</th><th>Контакты</th><th>Первое / последнее</th><th>Объявления</th></tr></thead><tbody>
-{% for profile in profiles %}<tr class="border-t"><td class="p-3"><a class="text-blue-700" href="/profiles/{{ profile.id }}">{{ profile.canonical_label }}</a></td><td class="p-3">{% for kind, value in identifiers[profile.id] %}{{ value }}{% if not loop.last %}, {% endif %}{% endfor %}</td><td class="p-3">{{ profile.first_seen_at }}<br>{{ profile.last_seen_at }}</td><td class="p-3">{{ profile.active_occurrence_count }} активных / {{ profile.occurrence_count }}</td></tr>{% else %}<tr><td colspan="4" class="p-4">Профили не найдены.</td></tr>{% endfor %}
-</tbody></table></div>
-{% endblock %}
+{% extends "layouts/base.html" %}{% from "components/score.html" import score_badge %}{% block content %}<header class="page-header"><div><p class="eyebrow">SaparGuard</p><h1>{{ t('profiles.title') }}</h1></div></header><form method="get" class="filter-bar"><input name="query" value="{{ filters.query }}" placeholder="Профиль"><input name="phone" value="{{ filters.phone }}" placeholder="Телефон"><input name="plate" value="{{ filters.plate }}" placeholder="Нөмір"><input name="score_min" value="{{ filters.score_min }}" placeholder="Score min"><select name="score_level"><option value="">Score level</option>{% for level in ['low','medium','high','very_high'] %}<option value="{{ level }}" {% if filters.score_level==level %}selected{% endif %}>{{ t('score.' ~ level) }}</option>{% endfor %}</select><button>{{ t('common.apply') }}</button></form><p class="notice">{{ t('profiles.score_notice') }}</p><section class="data-card"><table><thead><tr><th>Профиль</th><th>{{ t('profiles.priority') }}</th><th>{{ t('common.last_seen') }}</th><th>Наблюдения</th><th>Контакты</th></tr></thead><tbody>{% for profile in profiles %}<tr><td><a href="/profiles/{{ profile.id }}">{{ profile.canonical_label }}</a><br><small>{{ profile.profile_kind }}</small></td><td>{{ score_badge(scores[profile.id]) }}</td><td>{{ profile.last_seen_at|display_datetime }}</td><td>{{ profile.occurrence_count }}</td><td>{% for kind,value in identifiers[profile.id] %}{{ value }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% else %}<tr><td colspan="5">{{ t('common.no_data') }}</td></tr>{% endfor %}</tbody></table></section>{% endblock %}

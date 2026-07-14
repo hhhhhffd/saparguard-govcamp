@@ -1,0 +1,2 @@
+{"text":"Алматы → Бишкек такси","expected":[{"origin":"Алматы","destination":"Бишкек"}]}
+{"text":"из Астана в Тараз","expected":[{"origin":"Астана","destination":"Тараз"}]}

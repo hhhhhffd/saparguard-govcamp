@@ -13,6 +13,18 @@ from app.web.templating import templates
 router = APIRouter(prefix="/ui/actions")
 
 
+@router.post("/locale", response_class=RedirectResponse)
+async def set_locale(locale: str = Form(...), next_url: str = Form("/")) -> RedirectResponse:
+    """Persist a deliberate UI language choice while preserving the current URL."""
+    if locale not in {"kk", "ru"}:
+        raise HTTPException(status_code=422, detail="Unsupported locale")
+    if not next_url.startswith("/") or next_url.startswith("//"):
+        raise HTTPException(status_code=422, detail="Invalid return URL")
+    response = RedirectResponse(url=next_url, status_code=303)
+    response.set_cookie("saparguard_locale", locale, max_age=60 * 60 * 24 * 365, samesite="lax")
+    return response
+
+
 async def sources_action_response(
     request: Request, session: AsyncSession
 ) -> HTMLResponse | RedirectResponse:

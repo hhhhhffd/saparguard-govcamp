@@ -6,6 +6,7 @@ const vendorRoot = resolve(assetsRoot, "../app/web/static/vendor");
 const files = [
   ["node_modules/htmx.org/dist/htmx.min.js", "htmx.min.js"],
   ["node_modules/@alpinejs/csp/dist/cdn.min.js", "alpine-csp.min.js"],
+  ["node_modules/cytoscape/dist/cytoscape.min.js", "cytoscape.min.js"],
 ];
 
 await mkdir(vendorRoot, { recursive: true });
