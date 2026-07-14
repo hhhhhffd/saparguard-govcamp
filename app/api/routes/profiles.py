@@ -288,7 +288,9 @@ async def get_profile(
             .group_by(MessageRoute.normalized_origin, MessageRoute.normalized_destination)
         )
     ).all()
-    priority = (await scores_for_profiles(session, [profile_id], generated_at=datetime.now(timezone.utc)))[profile_id]
+    priority = (
+        await scores_for_profiles(session, [profile_id], generated_at=datetime.now(timezone.utc))
+    )[profile_id]
     return {
         "profile": model_data(
             profile,

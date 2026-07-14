@@ -33,26 +33,35 @@ async def scores_for_profiles(
     occurrences = (
         select(
             ProfileOccurrence.profile_id,
-            func.count(ProfileOccurrence.id).filter(TelegramMessage.published_at >= cutoff).label("recent"),
+            func.count(ProfileOccurrence.id)
+            .filter(TelegramMessage.published_at >= cutoff)
+            .label("recent"),
             func.count(func.distinct(TelegramMessage.telegram_chat_id))
             .filter(TelegramMessage.published_at >= cutoff)
             .label("sources"),
         )
         .join(TelegramMessage, TelegramMessage.id == ProfileOccurrence.message_id)
-        .where(ProfileOccurrence.profile_id.in_(profile_ids), ProfileOccurrence.source_deleted.is_(False))
+        .where(
+            ProfileOccurrence.profile_id.in_(profile_ids),
+            ProfileOccurrence.source_deleted.is_(False),
+        )
         .group_by(ProfileOccurrence.profile_id)
     )
     identifiers = (
         select(
             ProfileIdentifier.profile_id,
             func.bool_or(ProfileIdentifier.identifier_type == "phone").label("phone"),
-            func.bool_or(ProfileIdentifier.identifier_type.in_(("telegram_user_id", "telegram_username"))).label("telegram"),
+            func.bool_or(
+                ProfileIdentifier.identifier_type.in_(("telegram_user_id", "telegram_username"))
+            ).label("telegram"),
         )
         .where(ProfileIdentifier.profile_id.in_(profile_ids))
         .group_by(ProfileIdentifier.profile_id)
     )
     routes = (
-        select(ProfileOccurrence.profile_id, func.count(func.distinct(MessageRoute.id)).label("routes"))
+        select(
+            ProfileOccurrence.profile_id, func.count(func.distinct(MessageRoute.id)).label("routes")
+        )
         .join(TelegramMessage, TelegramMessage.id == ProfileOccurrence.message_id)
         .join(MessageAnalysis, MessageAnalysis.message_id == TelegramMessage.id)
         .join(MessageRoute, MessageRoute.analysis_id == MessageAnalysis.id)
@@ -95,16 +104,31 @@ async def scores_for_profiles(
         .subquery()
     )
     conflict_query = (
-        select(ProfileOccurrence.profile_id, func.count(func.distinct(ProfileResolutionConflict.id)))
-        .join(ProfileResolutionConflict, ProfileResolutionConflict.message_id == ProfileOccurrence.message_id)
-        .where(ProfileOccurrence.profile_id.in_(profile_ids), ProfileResolutionConflict.status == "open")
+        select(
+            ProfileOccurrence.profile_id, func.count(func.distinct(ProfileResolutionConflict.id))
+        )
+        .join(
+            ProfileResolutionConflict,
+            ProfileResolutionConflict.message_id == ProfileOccurrence.message_id,
+        )
+        .where(
+            ProfileOccurrence.profile_id.in_(profile_ids),
+            ProfileResolutionConflict.status == "open",
+        )
         .group_by(ProfileOccurrence.profile_id)
     )
 
     async def keyed(statement: Any) -> dict[int, Any]:
         return {row[0]: row[1:] for row in (await session.execute(statement)).all()}
 
-    occurrence_values, identifier_values, route_values, vehicle_values, link_values, conflict_values = (
+    (
+        occurrence_values,
+        identifier_values,
+        route_values,
+        vehicle_values,
+        link_values,
+        conflict_values,
+    ) = (
         await keyed(occurrences),
         await keyed(identifiers),
         await keyed(routes),
@@ -117,7 +141,13 @@ async def scores_for_profiles(
         for profile_id, rows in _group_rows((await session.execute(select(related))).all()).items()
     }
     profile_last_seen = dict(
-        (await session.execute(select(ProfileOccurrence.profile_id, func.max(ProfileOccurrence.first_seen_at)).where(ProfileOccurrence.profile_id.in_(profile_ids)).group_by(ProfileOccurrence.profile_id))).all()
+        (
+            await session.execute(
+                select(ProfileOccurrence.profile_id, func.max(ProfileOccurrence.first_seen_at))
+                .where(ProfileOccurrence.profile_id.in_(profile_ids))
+                .group_by(ProfileOccurrence.profile_id)
+            )
+        ).all()
     )
     result: dict[int, dict[str, Any]] = {}
     for profile_id in profile_ids:
@@ -132,10 +162,14 @@ async def scores_for_profiles(
                 last_seen_at=profile_last_seen.get(profile_id),
                 occurrences_last_7_days=int(recent or 0),
                 source_count_last_7_days=int(sources or 0),
-                has_phone=bool(phone), has_telegram_identity=bool(telegram), has_route=bool(route_count),
-                vehicle_count=int(vehicle_count or 0), plate_count=int(plate_count or 0),
+                has_phone=bool(phone),
+                has_telegram_identity=bool(telegram),
+                has_route=bool(route_count),
+                vehicle_count=int(vehicle_count or 0),
+                plate_count=int(plate_count or 0),
                 related_profile_count=relation_values.get(profile_id, 0),
-                link_observation_count=int(link_count or 0), conflict_count=int(conflict_count or 0),
+                link_observation_count=int(link_count or 0),
+                conflict_count=int(conflict_count or 0),
             ),
             generated_at=generated_at,
         )

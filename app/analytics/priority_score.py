@@ -63,8 +63,10 @@ def calculate_priority_score(
     else:
         freshness = 0
 
-    repeatability = 0 if values.occurrences_last_7_days == 0 else min(
-        15, 3 + 3 * (values.occurrences_last_7_days - 1)
+    repeatability = (
+        0
+        if values.occurrences_last_7_days == 0
+        else min(15, 3 + 3 * (values.occurrences_last_7_days - 1))
     )
     source_points = min(20, values.source_count_last_7_days * 7)
     identifiers = (
@@ -84,15 +86,21 @@ def calculate_priority_score(
     factors = [
         _factor("recent_activity", freshness, 10, {"last_seen_at": values.last_seen_at}),
         _factor(
-            "repeat_activity", repeatability, 15,
+            "repeat_activity",
+            repeatability,
+            15,
             {"occurrences_last_7_days": values.occurrences_last_7_days},
         ),
         _factor(
-            "independent_sources", source_points, 20,
+            "independent_sources",
+            source_points,
+            20,
             {"sources_last_7_days": values.source_count_last_7_days},
         ),
         _factor(
-            "identifier_completeness", identifiers, 15,
+            "identifier_completeness",
+            identifiers,
+            15,
             {
                 "phone": values.has_phone,
                 "telegram_identity": values.has_telegram_identity,
@@ -102,7 +110,9 @@ def calculate_priority_score(
             },
         ),
         _factor(
-            "connections", connections, 20,
+            "connections",
+            connections,
+            20,
             {
                 "vehicles": values.vehicle_count,
                 "related_profiles": values.related_profile_count,
