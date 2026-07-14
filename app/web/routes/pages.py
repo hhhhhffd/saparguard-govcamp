@@ -597,12 +597,15 @@ async def quality_page(
     from app.evaluation.report import load_latest_report
 
     total = await session.scalar(select(func.count(TelegramMessage.id))) or 0
-    reviewed = (
-        await session.scalar(
-            select(func.count(MessageAnnotation.id)).where(MessageAnnotation.status == "reviewed")
+    review_rows = (
+        await session.execute(
+            select(MessageAnnotation, TelegramMessage.text)
+            .join(TelegramMessage)
+            .where(MessageAnnotation.status == "reviewed")
         )
-        or 0
-    )
+    ).all()
+    reviewed = sum(not annotation_is_stale(annotation, text) for annotation, text in review_rows)
+    stale = len(review_rows) - reviewed
     skipped = (
         await session.scalar(
             select(func.count(MessageAnnotation.id)).where(MessageAnnotation.status == "skipped")
@@ -615,7 +618,7 @@ async def quality_page(
         )
         or 0
     )
-    annotated = reviewed + skipped + draft
+    annotated = reviewed + stale + skipped + draft
     human_report = load_latest_report(Path("evaluation/local-reviewed/reports"))
     return templates.TemplateResponse(
         request,
@@ -657,7 +660,9 @@ async def quality_page(
                 )
                 or 0,
                 "resolver_processed": await session.scalar(
-                    select(func.count(func.distinct(ProfileOccurrence.message_id)))
+                    select(func.count(func.distinct(ProfileResolutionJob.message_id))).where(
+                        ProfileResolutionJob.status == "completed"
+                    )
                 )
                 or 0,
                 "resolver_pending": (
@@ -679,6 +684,7 @@ async def quality_page(
                 "unreviewed": max(total - annotated, 0),
                 "draft": draft,
                 "reviewed": reviewed,
+                "stale": stale,
                 "skipped": skipped,
                 "reviewed_share": reviewed / total if total else None,
             },
@@ -695,6 +701,7 @@ async def review_page(
     limit: int = 50,
     seed: int = 0,
     source_id: int | None = None,
+    annotation_status: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     message_type: str | None = None,
@@ -714,12 +721,13 @@ async def review_page(
     filter_query = urlencode(
         {key: value for key, value in request.query_params.items() if key not in {"ids", "index"}}
     )
-    queue = [int(value) for value in ids.split(",") if value.isdigit()] if ids else []
+    queue = [int(value) for value in ids.split(",") if value.isdigit()][:200] if ids else []
     if not queue:
         queue = await select_review_queue(
             session,
             ReviewFilters(
                 source_id=source_id,
+                annotation_status=annotation_status,
                 date_from=date_from,
                 date_to=date_to,
                 message_type=message_type,
@@ -767,7 +775,9 @@ async def review_message_page(
     message = await get_review_message(session, message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="Message not found")
-    queue = [int(value) for value in ids.split(",") if value.isdigit()] if ids else [message_id]
+    queue = (
+        [int(value) for value in ids.split(",") if value.isdigit()][:200] if ids else [message_id]
+    )
     if message_id not in queue:
         queue.insert(0, message_id)
     index = queue.index(message_id) if message_id in queue else index

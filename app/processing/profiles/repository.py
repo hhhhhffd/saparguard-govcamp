@@ -213,6 +213,14 @@ class ProfileResolutionRepository:
                 ProfileVehicleLinkObservation.message_id == message.id
             )
         )
+        await self._session.execute(
+            update(ProfileResolutionConflict)
+            .where(
+                ProfileResolutionConflict.message_id == message.id,
+                ProfileResolutionConflict.status == "open",
+            )
+            .values(status="resolved", updated_at=datetime.now(timezone.utc))
+        )
         analysis = message.analysis
         phones = [entity for entity in analysis.entities if entity.entity_type == "phone"]
         profiles: list[TransportProfile] = []
@@ -552,8 +560,9 @@ class ProfileResolutionRepository:
     ) -> None:
         """Upsert detection details while preserving an analyst's decision fields."""
         canonical_details = json.dumps(details, ensure_ascii=False, sort_keys=True, default=str)
-        conflict_key = hashlib.sha256(
-            f"{message_id}:{conflict_type}:{canonical_details}".encode("utf-8")
+        conflict_key = hashlib.md5(
+            f"{message_id}:{conflict_type}:{canonical_details}".encode("utf-8"),
+            usedforsecurity=False,
         ).hexdigest()
         now = datetime.now(timezone.utc)
         statement = insert(ProfileResolutionConflict).values(
@@ -568,7 +577,14 @@ class ProfileResolutionRepository:
         await self._session.execute(
             statement.on_conflict_do_update(
                 index_elements=[ProfileResolutionConflict.conflict_key],
-                set_={"details": details, "updated_at": now},
+                set_={
+                    "details": details,
+                    "updated_at": now,
+                    "status": text(
+                        "CASE WHEN profile_resolution_conflicts.decided_at IS NULL "
+                        "THEN 'open' ELSE profile_resolution_conflicts.status END"
+                    ),
+                },
             )
         )
 

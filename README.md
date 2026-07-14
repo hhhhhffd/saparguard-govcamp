@@ -95,12 +95,14 @@ records a non-destructive review decision; it never merges or splits profiles.
 Export only reviewed rows locally (the export path is ignored by Git):
 
 ```bash
-python -m app.evaluation.export_reviewed --output-dir evaluation/local-reviewed --min-reviewed 1
+python -m app.evaluation.export_reviewed --output-dir evaluation/local-reviewed --min-reviewed 1 --include-sensitive-values
 python -m app.evaluation.cli run --dataset-dir evaluation/local-reviewed/human-reviewed-... --output-dir evaluation/local-reviewed/reports
 ```
 
-Exports mask phone-like values in message text by default and omit expected phone values. Use
-`--include-sensitive-values` only for access-controlled local storage. The shipped
+The command above creates the local sensitive export required for full evaluation. Default exports
+mask phone-like values and are only for review/transfer; the evaluation CLI rejects them unless
+explicitly overridden. Use `--include-sensitive-values` only for access-controlled local storage.
+The shipped
 `evaluation/datasets` fixtures are `synthetic_draft` smoke tests and are not evidence of production
 quality. Never commit real messages or review exports.
 

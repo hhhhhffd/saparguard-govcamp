@@ -9,6 +9,7 @@ from app.database.repositories import MediaJobRepository
 from app.database.session import get_session
 
 router = APIRouter(prefix="/media", tags=["media"])
+SAFE_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 @router.get("/{media_file_id}")
@@ -18,8 +19,16 @@ async def get_media_file(
     media_file = await MediaJobRepository(session).get_file(media_file_id)
     if media_file is None or media_file.relative_path is None:
         raise HTTPException(status_code=404, detail="Media file not available")
-    media_root = settings.media_storage_path.resolve()
-    path = (settings.media_storage_path.parent / media_file.relative_path).resolve()
-    if media_root not in path.parents or not path.is_file():
+    if media_file.mime_type not in SAFE_IMAGE_TYPES:
         raise HTTPException(status_code=404, detail="Media file not available")
-    return FileResponse(path, media_type=media_file.mime_type or "image/jpeg")
+    media_root = settings.media_storage_path.resolve(strict=False)
+    candidate = settings.media_storage_path.parent / media_file.relative_path
+    path = candidate.resolve(strict=False)
+    if media_root not in path.parents or not path.is_file() or candidate.is_symlink():
+        raise HTTPException(status_code=404, detail="Media file not available")
+    return FileResponse(
+        path,
+        media_type=media_file.mime_type,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=3600, nosniff"},
+    )

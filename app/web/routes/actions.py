@@ -125,9 +125,9 @@ async def save_review(
             )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    queue = [int(value) for value in ids.split(",") if value.isdigit()]
+    queue = [int(value) for value in ids.split(",") if value.isdigit()][:200]
     if queue:
-        next_index = min(index + 1, len(queue) - 1)
+        next_index = min(max(index, 0) + 1, len(queue) - 1)
         suffix = f"&{return_query}" if return_query else ""
         return RedirectResponse(
             f"/review/{queue[next_index]}?ids={ids}&index={next_index}{suffix}", status_code=303

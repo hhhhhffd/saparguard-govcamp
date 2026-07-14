@@ -24,6 +24,7 @@ from app.database.models import (
     MessageRoute,
     MediaProcessingJob,
     PlateDetection,
+    ProfileResolutionJob,
     TelegramMessage,
 )
 
@@ -46,6 +47,7 @@ ROUTE_SEPARATOR = re.compile(r"\s*(?:->|→|—|–)\s*")
 @dataclass(frozen=True)
 class ReviewFilters:
     source_id: int | None = None
+    annotation_status: str | None = None
     date_from: datetime | None = None
     date_to: datetime | None = None
     message_type: str | None = None
@@ -198,10 +200,18 @@ async def select_review_queue(
             predicates.append(condition if expected else ~condition)
     if filters.processing_failed:
         predicates.append(
-            or_(MessageAnalysisJob.status == "failed", MediaProcessingJob.status == "failed")
+            or_(
+                MessageAnalysisJob.status == "failed",
+                MediaProcessingJob.status == "failed",
+                ProfileResolutionJob.status == "failed",
+            )
         )
     if filters.unannotated_only:
         predicates.append(MessageAnnotation.id.is_(None))
+    if filters.annotation_status == "unreviewed":
+        predicates.append(MessageAnnotation.id.is_(None))
+    elif filters.annotation_status in VALID_STATUSES:
+        predicates.append(MessageAnnotation.status == filters.annotation_status)
 
     rows = (
         await session.execute(
@@ -221,6 +231,7 @@ async def select_review_queue(
                 exists(
                     select(MessageRoute.id).where(MessageRoute.analysis_id == MessageAnalysis.id)
                 ),
+                MessageAnnotation.source_text_hash,
                 exists(select(MediaFile.id).where(MediaFile.message_id == TelegramMessage.id)),
                 exists(
                     select(PlateDetection.id)
@@ -235,11 +246,18 @@ async def select_review_queue(
             .outerjoin(MessageAnnotation)
             .outerjoin(MessageAnalysisJob)
             .outerjoin(MediaProcessingJob, MediaProcessingJob.message_id == TelegramMessage.id)
+            .outerjoin(ProfileResolutionJob, ProfileResolutionJob.message_id == TelegramMessage.id)
             .where(and_(*predicates))
             .distinct()
             .order_by(TelegramMessage.id)
         )
     ).all()
+    if filters.annotation_status == "stale":
+        rows = [
+            row[:-1] for row in rows if row[-1] is not None and row[-1] != source_text_hash(row[4])
+        ]
+    else:
+        rows = [row[:-1] for row in rows]
     return stratified_sample(rows, limit=limit, seed=seed)
 
 
