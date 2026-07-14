@@ -28,7 +28,12 @@ from app.database.models import (
     Vehicle,
     VehicleObservation,
 )
-from app.review.service import ReviewFilters, get_review_message, select_review_queue
+from app.review.service import (
+    annotation_is_stale,
+    ReviewFilters,
+    get_review_message,
+    select_review_queue,
+)
 from app.analytics.profile_scores import rank_profile_ids, scores_for_profiles
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
@@ -734,6 +739,9 @@ async def review_message_page(
             "queue": queue,
             "queue_ids": ",".join(map(str, queue)),
             "index": index,
+            "annotation_stale": bool(
+                message.annotation and annotation_is_stale(message.annotation, message.text)
+            ),
             "display_timezone": settings.display_timezone,
         },
     )
