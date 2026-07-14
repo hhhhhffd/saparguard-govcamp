@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.models import ProfileResolutionConflict, TelegramMessage
 from app.database.repositories import SourceRepository
 from app.database.session import get_session
+from app.review.service import save_annotation
 from app.web.templating import templates
 
 router = APIRouter(prefix="/ui/actions")
@@ -87,3 +89,65 @@ async def source_action(
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return await sources_action_response(request, session)
+
+
+@router.post("/review/{message_id}", response_class=RedirectResponse)
+async def save_review(
+    message_id: int,
+    status: str = Form(...),
+    annotator: str = Form(...),
+    expected_message_type: str | None = Form(default=None),
+    phones: list[str] = Form(default=[]),
+    routes: list[str] = Form(default=[]),
+    vehicles: list[str] = Form(default=[]),
+    comment: str | None = Form(default=None),
+    ids: str = Form(default=""),
+    index: int = Form(default=0),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if await session.get(TelegramMessage, message_id) is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    try:
+        async with session.begin():
+            await save_annotation(
+                session,
+                message_id=message_id,
+                status=status,
+                annotator=annotator,
+                message_type=expected_message_type,
+                phones=phones,
+                routes=routes,
+                vehicles=vehicles,
+                comment=comment,
+            )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    queue = [int(value) for value in ids.split(",") if value.isdigit()]
+    if queue:
+        next_index = min(index + 1, len(queue) - 1)
+        return RedirectResponse(
+            f"/review/{queue[next_index]}?ids={ids}&index={next_index}", status_code=303
+        )
+    return RedirectResponse(f"/review/{message_id}", status_code=303)
+
+
+@router.post("/conflicts/{conflict_id}", response_class=RedirectResponse)
+async def decide_conflict(
+    conflict_id: int,
+    status: str = Form(...),
+    decided_by: str = Form(...),
+    comment: str | None = Form(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    if status not in {"reviewed", "dismissed"} or not decided_by.strip():
+        raise HTTPException(status_code=422, detail="Invalid conflict decision")
+    async with session.begin():
+        conflict = await session.get(ProfileResolutionConflict, conflict_id)
+        if conflict is None:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+        conflict.status = status
+        conflict.decided_by = decided_by.strip()
+        conflict.decision_comment = comment.strip() if comment else None
+        conflict.decided_at = datetime.now(timezone.utc)
+        conflict.updated_at = conflict.decided_at
+    return RedirectResponse(f"/conflicts?status={status}", status_code=303)

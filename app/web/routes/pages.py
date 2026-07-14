@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +21,14 @@ from app.database.models import (
     ProfileRelation,
     ProfileResolutionConflict,
     ProfileVehicleLink,
+    MessageAnnotation,
     TelegramChat,
     TelegramMessage,
     TransportProfile,
     Vehicle,
     VehicleObservation,
 )
+from app.review.service import ReviewFilters, get_review_message, select_review_queue
 from app.analytics.profile_scores import rank_profile_ids, scores_for_profiles
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
@@ -582,11 +585,180 @@ async def graph_page(
 
 
 @router.get("/quality", response_class=HTMLResponse)
-async def quality_page(request: Request) -> HTMLResponse:
+async def quality_page(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
     from app.evaluation.report import load_latest_report
 
+    total = await session.scalar(select(func.count(TelegramMessage.id))) or 0
+    reviewed = (
+        await session.scalar(
+            select(func.count(MessageAnnotation.id)).where(MessageAnnotation.status == "reviewed")
+        )
+        or 0
+    )
+    skipped = (
+        await session.scalar(
+            select(func.count(MessageAnnotation.id)).where(MessageAnnotation.status == "skipped")
+        )
+        or 0
+    )
+    human_report = load_latest_report(Path("evaluation/local-reviewed/reports"))
     return templates.TemplateResponse(
         request,
         "pages/quality.html",
-        {"report": load_latest_report(), "display_timezone": settings.display_timezone},
+        {
+            "synthetic_report": load_latest_report(),
+            "human_report": human_report,
+            "coverage": {
+                "total": total,
+                "text_processed": await session.scalar(select(func.count(MessageAnalysis.id))) or 0,
+                "media_processed": await session.scalar(
+                    select(func.count(MediaProcessingJob.id)).where(
+                        MediaProcessingJob.status == "completed"
+                    )
+                )
+                or 0,
+                "resolver_processed": await session.scalar(select(func.count(ProfileOccurrence.id)))
+                or 0,
+                "pending": (
+                    await session.scalar(
+                        select(func.count(MessageAnalysisJob.id)).where(
+                            MessageAnalysisJob.status == "pending"
+                        )
+                    )
+                    or 0
+                ),
+                "failed": (
+                    await session.scalar(
+                        select(func.count(MessageAnalysisJob.id)).where(
+                            MessageAnalysisJob.status == "failed"
+                        )
+                    )
+                    or 0
+                ),
+                "reviewed": reviewed,
+                "skipped": skipped,
+                "reviewed_share": reviewed / total if total else None,
+            },
+            "display_timezone": settings.display_timezone,
+        },
+    )
+
+
+@router.get("/review", response_class=HTMLResponse)
+async def review_page(
+    request: Request,
+    ids: str | None = None,
+    index: int = 0,
+    limit: int = 50,
+    seed: int = 0,
+    source_id: int | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    message_type: str | None = None,
+    confidence_min: float | None = None,
+    confidence_max: float | None = None,
+    has_phone: bool | None = None,
+    has_route: bool | None = None,
+    has_vehicle: bool | None = None,
+    has_media: bool | None = None,
+    has_plate: bool | None = None,
+    processing_failed: bool = False,
+    unannotated_only: bool = False,
+    include_deleted: bool = False,
+    include_empty: bool = False,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    queue = [int(value) for value in ids.split(",") if value.isdigit()] if ids else []
+    if not queue:
+        queue = await select_review_queue(
+            session,
+            ReviewFilters(
+                source_id=source_id,
+                date_from=date_from,
+                date_to=date_to,
+                message_type=message_type,
+                confidence_min=confidence_min,
+                confidence_max=confidence_max,
+                has_phone=has_phone,
+                has_route=has_route,
+                has_vehicle=has_vehicle,
+                has_media=has_media,
+                has_plate=has_plate,
+                processing_failed=processing_failed,
+                unannotated_only=unannotated_only,
+                include_deleted=include_deleted,
+                include_empty=include_empty,
+            ),
+            limit=min(max(limit, 1), 200),
+            seed=seed,
+        )
+    if not queue:
+        return templates.TemplateResponse(
+            request,
+            "pages/review.html",
+            {
+                "message": None,
+                "queue": [],
+                "index": 0,
+                "display_timezone": settings.display_timezone,
+            },
+        )
+    index = min(max(index, 0), len(queue) - 1)
+    return await review_message_page(
+        request, queue[index], ",".join(map(str, queue)), index, session
+    )
+
+
+@router.get("/review/{message_id}", response_class=HTMLResponse)
+async def review_message_page(
+    request: Request,
+    message_id: int,
+    ids: str | None = None,
+    index: int = 0,
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    message = await get_review_message(session, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    queue = [int(value) for value in ids.split(",") if value.isdigit()] if ids else [message_id]
+    if message_id not in queue:
+        queue.insert(0, message_id)
+    index = queue.index(message_id) if message_id in queue else index
+    return templates.TemplateResponse(
+        request,
+        "pages/review.html",
+        {
+            "message": message,
+            "queue": queue,
+            "queue_ids": ",".join(map(str, queue)),
+            "index": index,
+            "display_timezone": settings.display_timezone,
+        },
+    )
+
+
+@router.get("/conflicts", response_class=HTMLResponse)
+async def conflicts_page(
+    request: Request,
+    status: str = "open",
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    if status not in {"open", "reviewed", "dismissed"}:
+        raise HTTPException(status_code=422, detail="Unsupported conflict status")
+    conflicts = list(
+        (
+            await session.scalars(
+                select(ProfileResolutionConflict)
+                .where(ProfileResolutionConflict.status == status)
+                .order_by(ProfileResolutionConflict.created_at.desc())
+                .limit(200)
+            )
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "pages/conflicts.html",
+        {"conflicts": conflicts, "status": status, "display_timezone": settings.display_timezone},
     )
