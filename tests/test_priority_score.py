@@ -45,7 +45,7 @@ def test_priority_score_is_bounded_and_deterministic() -> None:
     first = calculate_priority_score(value, generated_at=NOW)
     assert first == calculate_priority_score(value, generated_at=NOW)
     assert first["score"] == 100
-    assert [factor["points"] <= factor["max_points"] for factor in first["factors"]]
+    assert all(factor["points"] <= factor["max_points"] for factor in first["factors"])
 
 
 def test_freshness_boundaries() -> None:

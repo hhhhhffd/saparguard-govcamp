@@ -51,4 +51,5 @@ TRANSLATIONS = {
     "score.very_high": "очень высокий",
     "quality.draft": "Предварительная разметка",
     "quality.unreviewed": "Исходная разметка, не проверенная человеком",
+    "system.status_unknown": "Нет данных о состоянии",
 }

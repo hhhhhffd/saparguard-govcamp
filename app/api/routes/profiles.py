@@ -20,7 +20,7 @@ from app.database.models import (
     VehicleObservation,
 )
 from app.database.session import get_session
-from app.analytics.profile_scores import scores_for_profiles
+from app.analytics.profile_scores import rank_profile_ids, scores_for_profiles
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 vehicles_router = APIRouter(prefix="/vehicles", tags=["vehicles"])
@@ -72,6 +72,7 @@ async def list_profiles(
     sort: str | None = None,
     limit: int = Query(50, ge=1, le=100),
     cursor: int | None = None,
+    offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
     filters = []
@@ -138,14 +139,34 @@ async def list_profiles(
     )
     if has_conflicts is not None:
         filters.append(conflict_count > 0 if has_conflicts else conflict_count == 0)
-    statement = (
-        select(TransportProfile, conflict_count.label("conflicts"))
-        .where(*filters)
-        .order_by(TransportProfile.id.desc())
-        .limit(limit + 1)
+    candidate_ids = list(
+        (
+            await session.scalars(
+                select(TransportProfile.id).where(*filters).order_by(TransportProfile.id)
+            )
+        ).all()
     )
-    rows = (await session.execute(statement)).all()
-    profiles = [row[0] for row in rows[:limit]]
+    ranked_ids, all_scores = await rank_profile_ids(
+        session,
+        candidate_ids,
+        generated_at=datetime.now(timezone.utc),
+        score_min=score_min,
+        score_max=score_max,
+        score_level=score_level,
+    )
+    if sort != "score_desc":
+        ranked_ids.sort(reverse=True)
+    selected_ids = ranked_ids[offset : offset + limit]
+    rows = (
+        await session.execute(
+            select(TransportProfile, conflict_count.label("conflicts")).where(
+                TransportProfile.id.in_(selected_ids)
+            )
+        )
+    ).all()
+    row_by_id = {profile.id: (profile, conflicts) for profile, conflicts in rows}
+    rows = [row_by_id[profile_id] for profile_id in selected_ids]
+    profiles = [row[0] for row in rows]
     ids = [profile.id for profile in profiles]
     identifiers = (
         (
@@ -193,7 +214,7 @@ async def list_profiles(
     for profile_id, identifier_type, value in identifiers:
         if identifier_type in by_profile[profile_id]:
             by_profile[profile_id][identifier_type].append(value)
-    scores = await scores_for_profiles(session, ids, generated_at=datetime.now(timezone.utc))
+    scores = {profile_id: all_scores[profile_id] for profile_id in ids}
     items = [
         {
             **profile_summary(
@@ -208,18 +229,10 @@ async def list_profiles(
         }
         for profile, conflicts in rows[:limit]
     ]
-    if score_min is not None:
-        items = [item for item in items if item["priority"]["score"] >= score_min]
-    if score_max is not None:
-        items = [item for item in items if item["priority"]["score"] <= score_max]
-    if score_level:
-        items = [item for item in items if item["priority"]["level"] == score_level]
-    if sort == "score_desc":
-        items.sort(key=lambda item: (-item["priority"]["score"], -item["id"]))
     return {
         "items": items,
-        "next_cursor": profiles[-1].id if len(rows) > limit and profiles else None,
-        "has_more": len(rows) > limit,
+        "next_cursor": offset + limit if offset + limit < len(ranked_ids) else None,
+        "has_more": offset + limit < len(ranked_ids),
     }
 
 

@@ -26,7 +26,7 @@ from app.database.models import (
     Vehicle,
     VehicleObservation,
 )
-from app.analytics.profile_scores import scores_for_profiles
+from app.analytics.profile_scores import rank_profile_ids, scores_for_profiles
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
 from app.web.templating import templates
@@ -100,7 +100,7 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
     now = datetime.now(timezone.utc)
     processed = await session.scalar(select(func.count(MessageAnalysis.id))) or 0
     total_messages = await session.scalar(select(func.count(TelegramMessage.id))) or 0
-    profile_ids = list((await session.scalars(select(TransportProfile.id).limit(250))).all())
+    profile_ids = list((await session.scalars(select(TransportProfile.id))).all())
     scores = await scores_for_profiles(session, profile_ids, generated_at=now)
     stats = {
         "active_sources": (
@@ -122,40 +122,41 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
         "last_message_at": await session.scalar(select(func.max(TelegramMessage.published_at))),
     }
     activity = []
+    message_days = dict(
+        (
+            await session.execute(
+                select(func.date(TelegramMessage.published_at), func.count())
+                .where(TelegramMessage.published_at >= now - timedelta(days=7))
+                .group_by(func.date(TelegramMessage.published_at))
+            )
+        ).all()
+    )
+    analysis_days = dict(
+        (
+            await session.execute(
+                select(func.date(TelegramMessage.published_at), func.count())
+                .join(MessageAnalysis)
+                .where(TelegramMessage.published_at >= now - timedelta(days=7))
+                .group_by(func.date(TelegramMessage.published_at))
+            )
+        ).all()
+    )
+    profile_days = dict(
+        (
+            await session.execute(
+                select(func.date(ProfileOccurrence.first_seen_at), func.count())
+                .where(ProfileOccurrence.first_seen_at >= now - timedelta(days=7))
+                .group_by(func.date(ProfileOccurrence.first_seen_at))
+            )
+        ).all()
+    )
     for day_offset in range(6, -1, -1):
         day_start = (now - timedelta(days=day_offset)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        day_end = day_start + timedelta(days=1)
-        received = (
-            await session.scalar(
-                select(func.count(TelegramMessage.id)).where(
-                    TelegramMessage.published_at >= day_start,
-                    TelegramMessage.published_at < day_end,
-                )
-            )
-            or 0
-        )
-        analyzed = (
-            await session.scalar(
-                select(func.count(MessageAnalysis.id))
-                .join(TelegramMessage)
-                .where(
-                    TelegramMessage.published_at >= day_start,
-                    TelegramMessage.published_at < day_end,
-                )
-            )
-            or 0
-        )
-        updated = (
-            await session.scalar(
-                select(func.count(ProfileOccurrence.id)).where(
-                    ProfileOccurrence.first_seen_at >= day_start,
-                    ProfileOccurrence.first_seen_at < day_end,
-                )
-            )
-            or 0
-        )
+        received = message_days.get(day_start.date(), 0)
+        analyzed = analysis_days.get(day_start.date(), 0)
+        updated = profile_days.get(day_start.date(), 0)
         activity.append(
             {"date": day_start, "received": received, "processed": analyzed, "profiles": updated}
         )
@@ -227,6 +228,12 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
             "vehicle_count": await session.scalar(select(func.count(Vehicle.id))) or 0,
             "plate_count": await session.scalar(select(func.count(PlateDetection.id))) or 0,
             "high_score_count": sum(item["score"] >= 50 for item in scores.values()),
+            "conflict_count": await session.scalar(
+                select(func.count(ProfileResolutionConflict.id)).where(
+                    ProfileResolutionConflict.status == "open"
+                )
+            )
+            or 0,
             "scores": scores,
             "activity": activity,
             "distribution": distribution,
@@ -297,6 +304,8 @@ async def profiles_page(
     score_min: int | None = None,
     score_max: int | None = None,
     score_level: str | None = None,
+    page: int = 1,
+    limit: int = 50,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     filters = []
@@ -327,16 +336,32 @@ async def profiles_page(
         filters.append(TransportProfile.id.in_(vehicle_query))
     if query:
         filters.append(TransportProfile.canonical_label.ilike(f"%{query}%"))
-    profiles = list(
+    candidate_ids = list(
         (
             await session.scalars(
-                select(TransportProfile)
-                .where(*filters)
-                .order_by(TransportProfile.last_seen_at.desc())
-                .limit(250)
+                select(TransportProfile.id).where(*filters).order_by(TransportProfile.id)
             )
         ).all()
     )
+    ranked_ids, scores = await rank_profile_ids(
+        session,
+        candidate_ids,
+        generated_at=datetime.now(timezone.utc),
+        score_min=score_min,
+        score_max=score_max,
+        score_level=score_level,
+    )
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+    start = (page - 1) * limit
+    page_ids = ranked_ids[start : start + limit]
+    profiles_by_id = {
+        profile.id: profile
+        for profile in (
+            await session.scalars(select(TransportProfile).where(TransportProfile.id.in_(page_ids)))
+        ).all()
+    }
+    profiles = [profiles_by_id[profile_id] for profile_id in page_ids]
     identifiers = (
         (
             await session.execute(
@@ -353,23 +378,17 @@ async def profiles_page(
     by_profile: dict[int, list[tuple[str, str]]] = {profile.id: [] for profile in profiles}
     for profile_id, identifier_type, value in identifiers:
         by_profile[profile_id].append((identifier_type, value))
-    scores = await scores_for_profiles(
-        session, [profile.id for profile in profiles], generated_at=datetime.now(timezone.utc)
-    )
-    profiles = [
-        profile
-        for profile in profiles
-        if (score_min is None or scores[profile.id]["score"] >= score_min)
-        and (score_max is None or scores[profile.id]["score"] <= score_max)
-        and (score_level is None or scores[profile.id]["level"] == score_level)
-    ]
-    profiles.sort(key=lambda profile: (-scores[profile.id]["score"], -profile.id))
     return templates.TemplateResponse(
         request,
         "pages/profiles.html",
         {
             "profiles": profiles,
             "scores": scores,
+            "pagination": {
+                "page": page,
+                "has_more": start + limit < len(ranked_ids),
+                "total": len(ranked_ids),
+            },
             "identifiers": by_profile,
             "filters": {
                 "phone": phone or "",

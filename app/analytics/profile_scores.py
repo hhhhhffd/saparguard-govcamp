@@ -22,6 +22,36 @@ from app.database.models import (
     Vehicle,
 )
 
+MAX_RANKED_PROFILES = 5_000
+
+
+async def rank_profile_ids(
+    session: AsyncSession,
+    candidate_ids: list[int],
+    *,
+    generated_at: datetime,
+    score_min: int | None = None,
+    score_max: int | None = None,
+    score_level: str | None = None,
+) -> tuple[list[int], dict[int, dict[str, Any]]]:
+    """Rank all matching IDs before pagination in fixed aggregate queries.
+
+    The current data volume fits a bounded in-memory ordering.  It avoids loading
+    observations/messages per profile and preserves a globally stable ordering.
+    """
+    if len(candidate_ids) > MAX_RANKED_PROFILES:
+        candidate_ids = candidate_ids[:MAX_RANKED_PROFILES]
+    scores = await scores_for_profiles(session, candidate_ids, generated_at=generated_at)
+    ranked = [
+        profile_id
+        for profile_id in candidate_ids
+        if (score_min is None or scores[profile_id]["score"] >= score_min)
+        and (score_max is None or scores[profile_id]["score"] <= score_max)
+        and (score_level is None or scores[profile_id]["level"] == score_level)
+    ]
+    ranked.sort(key=lambda profile_id: (-scores[profile_id]["score"], -profile_id))
+    return ranked, scores
+
 
 async def scores_for_profiles(
     session: AsyncSession, profile_ids: list[int], *, generated_at: datetime

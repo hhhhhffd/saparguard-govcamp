@@ -51,4 +51,5 @@ TRANSLATIONS = {
     "score.very_high": "өте жоғары",
     "quality.draft": "Алдын ала разметка",
     "quality.unreviewed": "Адам тексермеген бастапқы белгілеу",
+    "system.status_unknown": "Күй туралы дерек жоқ",
 }
