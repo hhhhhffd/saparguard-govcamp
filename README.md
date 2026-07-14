@@ -85,6 +85,25 @@ Telegram-текст отображается экранированным. Serve
 `unsafe-eval`, `X-Content-Type-Options`, `Referrer-Policy` и защиту от embedding; Swagger `/docs`
 не затрагивается этой CSP.
 
+## Human review and evaluation
+
+Collected PostgreSQL messages are production observations, not an evaluation dataset. Open `/review`
+to review a deterministic sample, explicitly save a draft, confirm it as reviewed, or skip it.
+Automatic predictions prefill the form but become human data only after **Подтвердить**. `/conflicts`
+records a non-destructive review decision; it never merges or splits profiles.
+
+Export only reviewed rows locally (the export path is ignored by Git):
+
+```bash
+python -m app.evaluation.export_reviewed --output-dir evaluation/local-reviewed --min-reviewed 1
+python -m app.evaluation.cli run --dataset-dir evaluation/local-reviewed/human-reviewed-... --output-dir evaluation/local-reviewed/reports
+```
+
+Exports mask phone-like values in message text by default and omit expected phone values. Use
+`--include-sensitive-values` only for access-controlled local storage. The shipped
+`evaluation/datasets` fixtures are `synthetic_draft` smoke tests and are not evidence of production
+quality. Never commit real messages or review exports.
+
 ## Media processing boundary
 
 Сейчас worker должен жить рядом с collector, потому что загрузка Telegram-файлов использует его
