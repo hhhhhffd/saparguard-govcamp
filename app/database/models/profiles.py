@@ -228,6 +228,9 @@ class ProfileResolutionConflict(Base):
     conflict_type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    decision_comment: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[str | None] = mapped_column(String(255))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

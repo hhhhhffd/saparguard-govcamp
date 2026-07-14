@@ -20,6 +20,12 @@ from app.database.models.profiles import (
     Vehicle,
     VehicleObservation,
 )
+from app.database.models.review import (
+    AnnotationPhone,
+    AnnotationRoute,
+    AnnotationVehicle,
+    MessageAnnotation,
+)
 from app.database.models.telegram import (
     CollectorState,
     MessageEdit,
@@ -30,6 +36,9 @@ from app.database.models.telegram import (
 
 __all__ = [
     "Base",
+    "AnnotationPhone",
+    "AnnotationRoute",
+    "AnnotationVehicle",
     "CollectorState",
     "ExtractedEntity",
     "MediaFile",
@@ -37,6 +46,7 @@ __all__ = [
     "MessageEdit",
     "MessageAnalysis",
     "MessageAnalysisJob",
+    "MessageAnnotation",
     "MessageRoute",
     "PlateDetection",
     "ProfileIdentifier",
