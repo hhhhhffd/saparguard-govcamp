@@ -105,10 +105,11 @@ async def save_review(
     index: int = Form(default=0),
     session: AsyncSession = Depends(get_session),
 ) -> RedirectResponse:
-    if await session.get(TelegramMessage, message_id) is None:
-        raise HTTPException(status_code=404, detail="Message not found")
     try:
         async with session.begin():
+            message = await session.get(TelegramMessage, message_id)
+            if message is None:
+                raise HTTPException(status_code=404, detail="Message not found")
             await save_annotation(
                 session,
                 message_id=message_id,
@@ -119,6 +120,7 @@ async def save_review(
                 routes=routes,
                 vehicles=vehicles,
                 comment=comment,
+                source_text=message.text,
             )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

@@ -9,6 +9,12 @@ from typing import Any
 from app.evaluation.datasets import dataset_metadata, load_jsonl
 from app.evaluation.metrics import classification_metrics, entity_metrics
 from app.processing.text.analyzer import analyze_message
+from app.review.service import (
+    normalize_message_type,
+    normalize_phone,
+    normalize_route,
+    normalize_vehicle,
+)
 
 
 def _errors(
@@ -31,8 +37,8 @@ def _component(name: str, rows: list[dict[str, Any]], status: str) -> dict[str, 
     analyses = [analyze_message(row["text"]) for row in rows]
     if name == "classification":
         metrics = classification_metrics(
-            [row["expected"] for row in rows],
-            [item.classification.message_type for item in analyses],
+            [normalize_message_type(row["expected"]) for row in rows],
+            [normalize_message_type(item.classification.message_type) for item in analyses],
         )
         warnings = [
             f"Class {label} is absent in ground truth"
@@ -48,18 +54,31 @@ def _component(name: str, rows: list[dict[str, Any]], status: str) -> dict[str, 
         }
     if name == "routes":
         expected = [
-            {f"{value['origin']}->{value['destination']}" for value in row["expected"]}
+            {
+                "->".join(normalize_route(f"{value['origin']}->{value['destination']}"))
+                for value in row["expected"]
+            }
             for row in rows
         ]
         predicted = [
-            {f"{value.normalized_origin}->{value.normalized_destination}" for value in item.routes}
+            {
+                "->".join(
+                    normalize_route(f"{value.normalized_origin}->{value.normalized_destination}")
+                )
+                for value in item.routes
+            }
             for item in analyses
         ]
     else:
         entity_type = "phone" if name == "phones" else "vehicle"
-        expected = [set(row["expected"]) for row in rows]
+        normalizer = normalize_phone if entity_type == "phone" else normalize_vehicle
+        expected = [{normalizer(value) for value in row["expected"]} for row in rows]
         predicted = [
-            {value.normalized_value for value in item.entities if value.entity_type == entity_type}
+            {
+                normalizer(value.normalized_value)
+                for value in item.entities
+                if value.entity_type == entity_type
+            }
             for item in analyses
         ]
     metrics = entity_metrics(expected, predicted)
@@ -72,8 +91,12 @@ def _component(name: str, rows: list[dict[str, Any]], status: str) -> dict[str, 
     }
 
 
-def run(dataset_dir: Path, output_dir: Path) -> dict[str, object]:
+def run(dataset_dir: Path, output_dir: Path, *, allow_redacted: bool = False) -> dict[str, object]:
     metadata = dataset_metadata(dataset_dir)
+    if metadata.get("redacted") and not allow_redacted:
+        raise ValueError(
+            "Redacted dataset is not suitable for full evaluation; use sensitive export"
+        )
     dataset_type = metadata["dataset_type"]
     components: dict[str, object] = {}
     reviewed_path = dataset_dir / "reviewed.jsonl"
@@ -135,8 +158,9 @@ def main() -> None:
     parser.add_argument("run")
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--allow-redacted", action="store_true")
     args = parser.parse_args()
-    run(args.dataset_dir, args.output_dir)
+    run(args.dataset_dir, args.output_dir, allow_redacted=args.allow_redacted)
 
 
 if __name__ == "__main__":

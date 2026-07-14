@@ -14,8 +14,9 @@ from sqlalchemy.orm import selectinload
 
 from app.database.models import MessageAnnotation
 from app.database.session import SessionFactory
+from app.review.service import annotation_is_stale
 
-PHONE_IN_TEXT = re.compile(r"(?<!\d)(?:\+?\d[\d\s()\-]{7,}\d)(?!\d)")
+PHONE_IN_TEXT = re.compile(r"(?<!\d)(?:\+?\d[\d\s()./\-]{7,}\d)(?!\d)")
 
 
 def mask_phones(text: str) -> str:
@@ -34,7 +35,11 @@ async def export(output_dir: Path, min_reviewed: int, include_sensitive_values: 
                 selectinload(MessageAnnotation.vehicles),
             )
         )
-        annotations = list((await session.scalars(query)).all())
+        annotations = [
+            annotation
+            for annotation in (await session.scalars(query)).all()
+            if not annotation_is_stale(annotation, annotation.message.text)
+        ]
     if len(annotations) < min_reviewed:
         raise ValueError(
             f"Need at least {min_reviewed} reviewed annotations; found {len(annotations)}"
@@ -79,6 +84,8 @@ async def export(output_dir: Path, min_reviewed: int, include_sensitive_values: 
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "example_count": len(rows),
         "sensitive_values_included": include_sensitive_values,
+        "redacted": not include_sensitive_values,
+        "suitable_for_full_evaluation": include_sensitive_values,
     }
     (export_dir / "metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"

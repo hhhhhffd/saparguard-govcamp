@@ -213,11 +213,6 @@ class ProfileResolutionRepository:
                 ProfileVehicleLinkObservation.message_id == message.id
             )
         )
-        await self._session.execute(
-            delete(ProfileResolutionConflict).where(
-                ProfileResolutionConflict.message_id == message.id
-            )
-        )
         analysis = message.analysis
         phones = [entity for entity in analysis.entities if entity.entity_type == "phone"]
         profiles: list[TransportProfile] = []
@@ -516,16 +511,10 @@ class ProfileResolutionRepository:
             if (plate.confidence or 0) >= settings.profile_plate_min_confidence
         ]
         if entities and high_plates and (len(entities) != 1 or len(high_plates) != 1):
-            now = datetime.now(timezone.utc)
-            self._session.add(
-                ProfileResolutionConflict(
-                    message_id=message.id,
-                    conflict_type="ambiguous_vehicle_plate_mapping",
-                    status="open",
-                    details={"vehicle_count": len(entities), "plate_count": len(high_plates)},
-                    created_at=now,
-                    updated_at=now,
-                )
+            await self._record_conflict(
+                message.id,
+                "ambiguous_vehicle_plate_mapping",
+                {"vehicle_count": len(entities), "plate_count": len(high_plates)},
             )
         if len(entities) == 1 and len(high_plates) == 1:
             vehicle = await self._plate_vehicle(
@@ -558,6 +547,31 @@ class ProfileResolutionRepository:
                         vehicle, message, [profile], "text", entity.id, None, entity.confidence
                     )
 
+    async def _record_conflict(
+        self, message_id: int, conflict_type: str, details: dict[str, object]
+    ) -> None:
+        """Upsert detection details while preserving an analyst's decision fields."""
+        canonical_details = json.dumps(details, ensure_ascii=False, sort_keys=True, default=str)
+        conflict_key = hashlib.sha256(
+            f"{message_id}:{conflict_type}:{canonical_details}".encode("utf-8")
+        ).hexdigest()
+        now = datetime.now(timezone.utc)
+        statement = insert(ProfileResolutionConflict).values(
+            message_id=message_id,
+            conflict_type=conflict_type,
+            conflict_key=conflict_key,
+            status="open",
+            details=details,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[ProfileResolutionConflict.conflict_key],
+                set_={"details": details, "updated_at": now},
+            )
+        )
+
     async def _plate_vehicle(
         self,
         plate: PlateDetection,
@@ -581,16 +595,10 @@ class ProfileResolutionRepository:
                 if value is not None and getattr(vehicle, key) not in (None, value)
             }
             if conflicts:
-                now = datetime.now(timezone.utc)
-                self._session.add(
-                    ProfileResolutionConflict(
-                        message_id=message_id,
-                        conflict_type="vehicle_identity_conflict",
-                        status="open",
-                        details={"vehicle_id": vehicle.id, "fields": conflicts},
-                        created_at=now,
-                        updated_at=now,
-                    )
+                await self._record_conflict(
+                    message_id,
+                    "vehicle_identity_conflict",
+                    {"vehicle_id": vehicle.id, "fields": conflicts},
                 )
             else:
                 for key, value in metadata.items():

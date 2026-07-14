@@ -227,6 +227,7 @@ class ProfileResolutionConflict(Base):
     )
     conflict_type: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    conflict_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     decision_comment: Mapped[str | None] = mapped_column(Text)
     decided_by: Mapped[str | None] = mapped_column(String(255))

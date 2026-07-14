@@ -29,6 +29,7 @@ class MessageAnnotation(Base):
     expected_message_type: Mapped[str | None] = mapped_column(String(32))
     comment: Mapped[str | None] = mapped_column(Text)
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

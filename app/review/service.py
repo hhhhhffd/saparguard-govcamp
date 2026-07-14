@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import random
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +29,18 @@ from app.database.models import (
 
 ANNOTATION_SCHEMA_VERSION = "1"
 VALID_STATUSES = {"draft", "reviewed", "skipped"}
+VALID_MESSAGE_TYPES = {
+    "unknown",
+    "conversation",
+    "service_message",
+    "commercial_spam",
+    "parcel_request",
+    "parcel_offer",
+    "passenger_request",
+    "driver_offer",
+}
 PHONE_DIGITS = re.compile(r"\D")
+ROUTE_SEPARATOR = re.compile(r"\s*(?:->|→|—|–)\s*")
 
 
 @dataclass(frozen=True)
@@ -53,23 +66,49 @@ def normalize_phone(value: str) -> str:
     digits = PHONE_DIGITS.sub("", value)
     if len(digits) == 11 and digits.startswith("8"):
         digits = "7" + digits[1:]
-    if len(digits) not in {11, 12} or not digits.startswith(("7", "996")):
+    if (digits.startswith("7") and len(digits) != 11) or (
+        digits.startswith("996") and len(digits) != 12
+    ):
         raise ValueError("Телефон должен быть нормализованным номером KZ/RU/KG")
+    if not digits.startswith(("7", "996")):
+        raise ValueError("Поддерживаются только номера KZ/RU (+7) и KG (+996)")
     return f"+{digits}"
 
 
 def normalize_route_value(value: str) -> str:
-    normalized = " ".join(value.split()).casefold()
+    normalized = " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
     if not normalized or len(normalized) > 255:
         raise ValueError("Пункт маршрута обязателен и не должен быть длиннее 255 символов")
     return normalized
 
 
 def normalize_vehicle(value: str) -> str:
-    normalized = " ".join(value.split()).upper()
+    normalized = " ".join(unicodedata.normalize("NFKC", value).replace("-", " ").split()).casefold()
     if not normalized or len(normalized) > 255:
         raise ValueError("Автомобиль обязателен и не должен быть длиннее 255 символов")
     return normalized
+
+
+def normalize_message_type(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    if normalized not in VALID_MESSAGE_TYPES:
+        raise ValueError("Недопустимый тип сообщения")
+    return normalized
+
+
+def source_text_hash(text: str | None) -> str:
+    return sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def annotation_is_stale(annotation: MessageAnnotation, text: str | None) -> bool:
+    return annotation.source_text_hash != source_text_hash(text)
+
+
+def normalize_route(value: str) -> tuple[str, str]:
+    parts = ROUTE_SEPARATOR.split(unicodedata.normalize("NFKC", value).strip())
+    if len(parts) != 2:
+        raise ValueError("Маршрут должен иметь вид origin -> destination")
+    return normalize_route_value(parts[0]), normalize_route_value(parts[1])
 
 
 def normalize_annotation_values(
@@ -83,10 +122,7 @@ def normalize_annotation_values(
     for value in routes:
         if not value.strip():
             continue
-        if "->" not in value:
-            raise ValueError("Маршрут должен иметь вид origin -> destination")
-        origin, destination = value.split("->", 1)
-        normalized_routes.add((normalize_route_value(origin), normalize_route_value(destination)))
+        normalized_routes.add(normalize_route(value))
     normalized_vehicles = sorted({normalize_vehicle(value) for value in vehicles if value.strip()})
     return normalized_phones, sorted(normalized_routes), normalized_vehicles
 
@@ -111,7 +147,9 @@ async def select_review_queue(
         predicates.append(TelegramMessage.text.is_not(None))
         predicates.append(TelegramMessage.text != "")
     if filters.source_id is not None:
-        predicates.append(TelegramMessage.telegram_chat_id == filters.source_id)
+        from app.database.models import TelegramChat
+
+        predicates.append(TelegramChat.id == filters.source_id)
     if filters.date_from:
         predicates.append(TelegramMessage.published_at >= filters.date_from)
     if filters.date_to:
@@ -161,11 +199,15 @@ async def select_review_queue(
                 TelegramMessage.text,
             )
             .outerjoin(MessageAnalysis)
+            .outerjoin(
+                TelegramChat, TelegramChat.telegram_chat_id == TelegramMessage.telegram_chat_id
+            )
             .outerjoin(MessageAnnotation)
             .outerjoin(MessageAnalysisJob)
             .outerjoin(MediaProcessingJob, MediaProcessingJob.message_id == TelegramMessage.id)
             .where(and_(*predicates))
             .distinct()
+            .order_by(TelegramMessage.id)
         )
     ).all()
     return stratified_sample(rows, limit=limit, seed=seed)
@@ -192,6 +234,7 @@ def stratified_sample(rows: list[object], *, limit: int, seed: int) -> list[int]
         )
     rng = random.Random(seed)
     for values in buckets.values():
+        values.sort()
         rng.shuffle(values)
     selected: list[int] = []
     while buckets and len(selected) < limit:
@@ -231,6 +274,7 @@ async def save_annotation(
     routes: list[str],
     vehicles: list[str],
     comment: str | None,
+    source_text: str | None,
 ) -> MessageAnnotation:
     if status not in VALID_STATUSES:
         raise ValueError("Недопустимый статус разметки")
@@ -254,9 +298,10 @@ async def save_annotation(
             message_id=message_id,
             annotator=annotator.strip(),
             status=status,
-            expected_message_type=message_type.strip() if message_type else None,
+            expected_message_type=normalize_message_type(message_type) if message_type else None,
             comment=comment.strip() if comment else None,
             schema_version=ANNOTATION_SCHEMA_VERSION,
+            source_text_hash=source_text_hash(source_text),
             created_at=now,
             updated_at=now,
             reviewed_at=now if status == "reviewed" else None,
@@ -266,9 +311,12 @@ async def save_annotation(
     else:
         annotation.status = status
         annotation.annotator = annotator.strip()
-        annotation.expected_message_type = message_type.strip() if message_type else None
+        annotation.expected_message_type = (
+            normalize_message_type(message_type) if message_type else None
+        )
         annotation.comment = comment.strip() if comment else None
         annotation.schema_version = ANNOTATION_SCHEMA_VERSION
+        annotation.source_text_hash = source_text_hash(source_text)
         annotation.updated_at = now
         annotation.reviewed_at = now if status == "reviewed" else None
         annotation.phones.clear()
