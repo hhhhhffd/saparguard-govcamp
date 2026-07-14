@@ -6,7 +6,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-REQUIRED_METADATA = {"schema_version", "annotation_status", "annotated_by", "reviewed_by_human"}
+REQUIRED_METADATA = {
+    "schema_version",
+    "annotation_status",
+    "annotated_by",
+    "reviewed_by_human",
+    "dataset_type",
+}
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -31,4 +37,8 @@ def dataset_metadata(dataset_dir: Path) -> dict[str, Any]:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if not REQUIRED_METADATA <= metadata.keys():
         raise ValueError("dataset metadata is incomplete")
+    if metadata["dataset_type"] not in {"synthetic_draft", "human_reviewed"}:
+        raise ValueError("dataset_type must be synthetic_draft or human_reviewed")
+    if metadata["dataset_type"] == "human_reviewed" and not metadata["reviewed_by_human"]:
+        raise ValueError("human_reviewed dataset must be explicitly reviewed by a human")
     return metadata

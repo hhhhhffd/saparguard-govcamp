@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 logs/
+evaluation/local-reviewed/
 deploy/
 web-assets/node_modules/
 app/web/static/css/

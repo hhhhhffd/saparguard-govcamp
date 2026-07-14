@@ -47,6 +47,14 @@ def classification_metrics(expected: list[str], predicted: list[str]) -> dict[st
 
 
 def entity_metrics(expected: list[set[str]], predicted: list[set[str]]) -> dict[str, object]:
+    if not expected:
+        return {
+            "precision": None,
+            "recall": None,
+            "f1": None,
+            "false_positives": 0,
+            "false_negatives": 0,
+        }
     true_positive = sum(
         len(actual & guess) for actual, guess in zip(expected, predicted, strict=True)
     )
@@ -72,4 +80,6 @@ def entity_metrics(expected: list[set[str]], predicted: list[set[str]]) -> dict[
         / len(expected)
         if expected
         else None,
+        "false_positives": false_positive,
+        "false_negatives": false_negative,
     }
