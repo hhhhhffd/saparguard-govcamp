@@ -35,6 +35,7 @@ services:
       - "8000:8000"
     volumes:
       - telethon_data:/app/data
+      - reviewed_artifacts:/app/evaluation/local-reviewed
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,3 +84,4 @@ volumes:
   postgres_data:
   telethon_data:
   alpr_cache:
+  reviewed_artifacts:

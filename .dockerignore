@@ -11,3 +11,4 @@ logs
 deploy
 .codegraph
 .serena
+evaluation/local-reviewed

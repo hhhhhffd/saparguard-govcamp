@@ -19,5 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY app ./app
+COPY evaluation/datasets ./evaluation/datasets
+COPY evaluation/reports ./evaluation/reports
 COPY --from=web-assets /build/app/web/static ./app/web/static
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data /app/logs /app/evaluation/local-reviewed /app/evaluation/local-reviewed/reports
