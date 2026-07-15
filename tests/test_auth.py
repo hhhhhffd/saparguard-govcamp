@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 import jwt
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 
 from app.auth.dependencies import require_admin, require_worker
@@ -22,7 +24,11 @@ from app.auth.service import (
 from app.core.config import settings
 from app.database.models import AppUser, Complaint, UserRole
 from app.web.routes.admin import user_update
-from app.web.routes.complaints import complaint_detail
+from app.web.routes.complaints import (
+    ComplaintMediaValidationError,
+    _validate_media_uploads,
+    complaint_detail,
+)
 
 
 def app_user(user_id: int, role: UserRole = UserRole.CITIZEN) -> AppUser:
@@ -52,6 +58,23 @@ def request_for(user: AppUser) -> Request:
 def test_short_password_is_rejected() -> None:
     with pytest.raises(AuthenticationError):
         hash_password("x" * (MIN_PASSWORD_LENGTH - 1))
+
+
+def test_complaint_media_accepts_allowed_types_only() -> None:
+    image = UploadFile(
+        filename="evidence.png",
+        file=BytesIO(b"image"),
+        headers=Headers({"content-type": "image/png"}),
+    )
+    unsupported = UploadFile(
+        filename="evidence.pdf",
+        file=BytesIO(b"pdf"),
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+
+    assert _validate_media_uploads([image])[0][2] == "image/png"
+    with pytest.raises(ComplaintMediaValidationError, match="error_media_type"):
+        _validate_media_uploads([unsupported])
 
 
 def test_accepted_password_is_bcrypt_hashed_without_plaintext() -> None:

@@ -87,6 +87,20 @@ class Complaint(Base):
     )
 
 
+class ComplaintMedia(Base):
+    __tablename__ = "complaint_media"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[int] = mapped_column(
+        ForeignKey("complaints.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    relative_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ComplaintStatusHistory(Base):
     __tablename__ = "complaint_status_history"
 

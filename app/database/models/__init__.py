@@ -2,6 +2,7 @@ from app.database.models.base import Base
 from app.database.models.accounts import (
     AppUser,
     Complaint,
+    ComplaintMedia,
     ComplaintStatus,
     ComplaintStatusHistory,
     RegistrationSource,
@@ -46,6 +47,7 @@ __all__ = [
     "Base",
     "AppUser",
     "Complaint",
+    "ComplaintMedia",
     "ComplaintStatus",
     "ComplaintStatusHistory",
     "AnnotationPhone",
