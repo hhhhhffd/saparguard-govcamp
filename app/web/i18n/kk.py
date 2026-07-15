@@ -90,6 +90,8 @@ TRANSLATIONS = {
     "navigation.complaints": "Шағымдар",
     "navigation.users": "Пайдаланушылар",
     "navigation.account": "Менің аккаунтым",
+    "navigation.collapse_sidebar": "Мәзірді жинау",
+    "navigation.expand_sidebar": "Мәзірді ашу",
     "common.back": "Артқа",
     "common.all": "Барлығы",
     "common.previous": "Алдыңғы",

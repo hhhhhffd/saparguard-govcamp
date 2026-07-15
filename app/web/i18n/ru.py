@@ -90,6 +90,8 @@ TRANSLATIONS = {
     "navigation.complaints": "Жалобы",
     "navigation.users": "Пользователи",
     "navigation.account": "Мой аккаунт",
+    "navigation.collapse_sidebar": "Свернуть меню",
+    "navigation.expand_sidebar": "Развернуть меню",
     "common.back": "Назад",
     "common.all": "Все",
     "common.previous": "Предыдущая",

@@ -101,6 +101,38 @@ function initComplaintForm() {
   });
 }
 
+function initSidebarToggle() {
+  const toggle = document.querySelector("[data-sidebar-toggle]");
+  if (!(toggle instanceof HTMLButtonElement)) return;
+
+  const setCollapsed = (collapsed, persist) => {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.setAttribute(
+      "aria-label",
+      collapsed ? toggle.dataset.expandLabel || "" : toggle.dataset.collapseLabel || "",
+    );
+    const icon = toggle.querySelector("span");
+    if (icon) icon.textContent = collapsed ? "›" : "‹";
+    if (persist) {
+      try {
+        window.localStorage.setItem("saparguard-sidebar-collapsed", String(collapsed));
+      } catch {
+        // The menu remains usable when browser storage is unavailable.
+      }
+    }
+  };
+
+  try {
+    setCollapsed(window.localStorage.getItem("saparguard-sidebar-collapsed") === "true", false);
+  } catch {
+    setCollapsed(false, false);
+  }
+  toggle.addEventListener("click", () => {
+    setCollapsed(!document.body.classList.contains("sidebar-collapsed"), true);
+  });
+}
+
 async function initGraph() {
   const container = document.querySelector("#relationship-graph");
   if (!container) return;
@@ -154,3 +186,4 @@ async function initGraph() {
 
 initGraph();
 initComplaintForm();
+initSidebarToggle();
