@@ -1,142 +1,110 @@
 # SaparGuard
 
-SaparGuard сохраняет сообщения выбранных Telegram-групп и каналов в PostgreSQL и детерминированно извлекает тип объявления, телефоны, маршруты, локации и автомобили.
-Он обрабатывает изображения и распознаёт номера, но на текущем этапе **не** выполняет extraction,
-ML-анализ сообщений, risk scoring, граф связей, карту или продуктовый dashboard.
+SaparGuard collects public Telegram transport announcements, processes their text and media, and provides an internal review system for observed profiles, vehicles, relationships and conflicts. It also provides a separate citizen-facing account and complaint workflow. Application users are never mixed with Telegram authors or observed transport profiles.
 
-API и Jinja Web UI работают в FastAPI, а collector — отдельный Telethon-процесс. Media worker
-запускается только внутри collector-процесса и получает уже авторизованный `TelegramClient`; второй
-процесс с тем же session-файлом не создаётся.
+## Architecture and pipeline
 
-## Требования
+- FastAPI serves JSON API, Jinja2 pages and HTMX fragments; frontend assets are built locally and shipped with the image.
+- Telethon collector saves messages and media jobs to PostgreSQL.
+- Text-analysis worker extracts message type, contacts, routes, locations and vehicle information.
+- Profile-resolution worker creates observed profiles, vehicle links, relationship evidence and conflicts.
+- PostgreSQL stores all durable application, review and complaint data. Alembic owns schema changes.
 
-- Python 3.12;
-- PostgreSQL;
-- Node.js с Corepack — только для локальной сборки frontend assets;
-- Docker Compose либо локальные Python/PostgreSQL.
+Collected observations are not verified identities and do not establish a violation or vehicle ownership.
 
-UI пока не содержит аутентификацию. Не выставляйте его публично без reverse proxy authentication
-или встроенной авторизации.
+## Access and accounts
 
-## Development
+All working pages and internal `/api/*` endpoints require a signed JWT stored in an HttpOnly, SameSite cookie. Tokens are never stored in `localStorage`.
+
+- `citizen` / «Гражданин»: manages an account, submits complaints and sees only their own complaints.
+- `worker` / «Сотрудник»: uses the existing analytical system and processes complaints.
+- `admin` / «Администратор»: has all worker access plus `/admin/users` account management.
+
+Citizens cannot access collected Telegram data, profiles, vehicles, graph, review, conflicts, sources, quality or internal API. Workers cannot open administration. Server-side checks return an HTML 403 page for browser requests and JSON 403 for API requests.
+
+Local registration is email-only and always creates an active citizen account. Passwords must contain at least 12 characters and are stored only as bcrypt hashes. Google OAuth/OIDC uses a verified Google email; matching local accounts are linked instead of duplicated. If Google is unconfigured, the login screen remains usable and shows the disabled `😢 Не работает...` fallback.
+
+An administrator can search, filter, create, edit, block, soft-delete and assign roles to accounts. Soft deletion preserves complaint and action history. The last active administrator cannot be deleted, blocked or demoted.
+
+## Environment
+
+Copy `.env.example` to `.env`. At minimum configure `DATABASE_URL` and a strong `JWT_SECRET`.
+
+```text
+JWT_SECRET=
+JWT_EXPIRE_MINUTES=480
+DEFAULT_ADMIN_EMAIL=
+DEFAULT_ADMIN_PASSWORD=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+```
+
+On first API start, `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` create one active administrator. The password must be at least 12 characters. Bootstrap is idempotent: an existing account is neither recreated nor has its password rotated. Do not place real passwords, Google secrets, Telegram sessions or review exports in Git.
+
+## Pages and API
+
+- Public: `/auth/login`, `/auth/register`, Google callback, static files and `/health`.
+- Citizen: `/complaints`, `/complaints/new`, `/complaints/{id}`, `/auth/me`.
+- Staff: `/`, `/sources`, `/messages`, `/review`, `/profiles`, `/vehicles`, `/graph`, `/conflicts`, `/quality` and internal `/api/*`.
+- Administrator: `/admin/users`.
+
+The graph has a bounded API response and discloses truncation. Profiles, vehicles, profile/vehicle timelines and conflicts use visible pagination. Evidence links use the internal message ID and do not rely on full-text search.
+
+## Local development
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 corepack enable
-cd web-assets
-pnpm install --frozen-lockfile
-pnpm build
-cd ..
+cd web-assets && pnpm install --frozen-lockfile && pnpm build && cd ..
 cp .env.example .env
-# заполните DATABASE_URL, TELEGRAM_API_ID и TELEGRAM_API_HASH
+# configure DATABASE_URL, JWT_SECRET and optional Telegram/Google settings
 .venv/bin/alembic upgrade head
 .venv/bin/uvicorn app.main:app --reload
-# в другом терминале
+# separate terminals, as required
 .venv/bin/python -m app.collector.service
-# независимый worker, Telegram credentials/session не нужны
 .venv/bin/python -m app.processing.text.worker
-# поставить исторические сообщения в очередь
-.venv/bin/python -m app.processing.text.backfill --days 7
+.venv/bin/python -m app.processing.profiles.worker
 ```
 
-Для разработки CSS в watch-режиме:
+For CSS/asset watch mode use `cd web-assets && pnpm dev`. No frontend dependency is loaded from a CDN.
 
-```bash
-cd web-assets
-pnpm dev
-```
-
-Все frontend-библиотеки локальны: HTMX 2.0.10, Alpine CSP 3.15.12 и Tailwind 4.3.2. Node.js и
-`node_modules` отсутствуют в runtime Docker image. См. [frontend stack](docs/frontend-stack.md).
-
-## Docker / production
+## Docker and systemd
 
 ```bash
 cp .env.example .env
-# заполните TELEGRAM_API_ID и TELEGRAM_API_HASH
 docker compose up --build
 ```
 
-Откройте `http://localhost:8000`. При первой авторизации collector должен работать в интерактивном
-терминале, чтобы создать Telethon session; затем session хранится в Docker volume `telethon_data`.
+The Compose migration service runs `alembic upgrade head` before API and workers. It does not reset PostgreSQL data. For a non-Docker deployment, build the bundle with `./scripts/prepare_deploy.sh` and install it with `scripts/install.sh`; systemd unit files live in `deployment/systemd/`.
 
-Non-Docker deploy создаёт bundle с уже собранными static assets:
+## Review and evaluation
+
+Synthetic fixtures in `evaluation/datasets` are smoke tests only; they do not demonstrate production quality. Human-reviewed data must remain in access-controlled local storage and must not be committed.
+
+Prepare a 100–200 message reviewed dataset with at least 20–30 samples per important message type, separate positive/negative examples, images with and without plates, and profile pairs for both same-subject and different-subject cases. Export false-positive and false-negative reports after review.
 
 ```bash
-./scripts/prepare_deploy.sh
-scp -r deploy user@vps:~/
-ssh user@vps 'cd ~/deploy && sudo bash scripts/install.sh'
+.venv/bin/python -m app.evaluation.export_reviewed \
+  --output-dir evaluation/local-reviewed --min-reviewed 1 --include-sensitive-values
+.venv/bin/python -m app.evaluation.cli run \
+  --dataset-dir evaluation/local-reviewed/human-reviewed-... \
+  --output-dir evaluation/local-reviewed/reports
 ```
 
-`install.sh` не устанавливает Node.js: он проверяет, что bundle содержит построенные CSS, HTMX,
-Alpine CSP и application JavaScript. Скрипт не удаляет существующие PostgreSQL данные, Telethon
-session, логи или `.env`.
-
-## Routes
-
-- JSON API: `/api/sources`, `/api/messages`, `/api/media`, `/api/stats`, `/api/collector/status`;
-- profile API: `/api/profiles`, `/api/profiles/{id}`, `/api/vehicles`, `/api/vehicles/{id}`;
-- pages: `/`, `/sources`, `/messages`, `/profiles`, `/profiles/{id}`, `/vehicles/{id}`;
-- HTMX fragments: `/ui/fragments/...`;
-- изменяющие Web actions (POST): `/ui/actions/...`.
-
-Telegram-текст отображается экранированным. Server-rendered Web routes получают CSP без
-`unsafe-eval`, `X-Content-Type-Options`, `Referrer-Policy` и защиту от embedding; Swagger `/docs`
-не затрагивается этой CSP.
-
-## Human review and evaluation
-
-Collected PostgreSQL messages are production observations, not an evaluation dataset. Open `/review`
-to review a deterministic sample, explicitly save a draft, confirm it as reviewed, or skip it.
-Automatic predictions prefill the form but become human data only after **Подтвердить**. `/conflicts`
-records a non-destructive review decision; it never merges or splits profiles.
-
-Export only reviewed rows locally (the export path is ignored by Git):
+## Verification
 
 ```bash
-python -m app.evaluation.export_reviewed --output-dir evaluation/local-reviewed --min-reviewed 1 --include-sensitive-values
-python -m app.evaluation.cli run --dataset-dir evaluation/local-reviewed/human-reviewed-... --output-dir evaluation/local-reviewed/reports
-```
-
-The command above creates the local sensitive export required for full evaluation. Default exports
-mask phone-like values and are only for review/transfer; the evaluation CLI rejects them unless
-explicitly overridden. Use `--include-sensitive-values` only for access-controlled local storage.
-The shipped
-`evaluation/datasets` fixtures are `synthetic_draft` smoke tests and are not evidence of production
-quality. Never commit real messages or review exports.
-
-## Media processing boundary
-
-Сейчас worker должен жить рядом с collector, потому что загрузка Telegram-файлов использует его
-авторизованный `TelegramClient`. Будущее безопасное разделение: отдельный компонент Telegram media
-fetch сохраняет локальный input, а независимый local image processor получает только файл и job ID.
-До появления этой границы отдельный Docker/systemd media-worker сервис запрещён.
-
-## Text analysis
-
-Text analysis is an offline rule-based baseline: its results carry confidence and evidence, and it does not use LLMs or cloud services. The `analysis-worker` Docker service uses PostgreSQL only and has no Telethon volume. Run `python -m app.processing.text.backfill --days N [--limit N] [--force]` to queue stored messages.
-
-## Checks
-
-```bash
-python -m compileall app alembic
-ruff check .
-ruff format --check .
-pytest
-alembic upgrade head
+.venv/bin/python -m compileall app alembic
+.venv/bin/ruff check app tests
+.venv/bin/pytest -q
+.venv/bin/alembic heads
 docker compose config
-docker compose build
 ```
 
-## Observed profiles and vehicles
+Integration tests require an isolated `POSTGRES_TEST_URL` whose database name ends in `_test` or `_integration`; see [the integration-test guide](docs/postgresql-integration-tests.md). Browser smoke testing must use a clean PostgreSQL instance and verify login, fallback Google UI, complaint handling, role boundaries, filters, pagination, evidence links and all staff pages.
 
-`profile-worker` resolves only `driver_offer` and `parcel_offer` messages. Exact normalized phones
-create/reuse phone-based observed profiles; Telegram user IDs are a conservative fallback and are
-not used for bot-like relays. Multiple phones result in separate profiles joined only by a
-`co_occurring_contact` relation. Exact high-confidence plates create global vehicle identities;
-vehicles without plates remain scoped to one profile signature. Profiles are observations from
-public ads, not verified people or proof of vehicle ownership.
+## Limits
 
-Run the worker with `python -m app.processing.profiles.worker`; queue stored messages with
-`python -m app.processing.profiles.backfill --days 7 [--limit N] [--force] [--only-provider-messages]`.
+The system processes only configured Telegram sources. Extraction and scoring are deterministic, evidence-backed aids for review, not a decision system. Google login requires valid Google OAuth configuration. Feature work is frozen after this release; subsequent changes should be bug fixes, tests and reliability improvements only.

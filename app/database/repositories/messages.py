@@ -118,10 +118,13 @@ class MessageRepository:
         message_type: str | None = None,
         entity_query: str | None = None,
         analysis_status: str | None = None,
+        message_id: int | None = None,
     ) -> tuple[list[TelegramMessage], int]:
         filters = []
         if query:
             filters.append(TelegramMessage.text.ilike(f"%{query}%"))
+        if message_id is not None:
+            filters.append(TelegramMessage.id == message_id)
         if chat_id is not None:
             filters.append(TelegramMessage.telegram_chat_id == chat_id)
         if sender_id is not None:

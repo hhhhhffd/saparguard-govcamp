@@ -57,6 +57,7 @@ async def message_page_context(
     message_type: str | None = None,
     entity_query: str | None = None,
     analysis_status: str | None = None,
+    message_id: int | None = None,
     session: AsyncSession,
 ) -> dict[str, object]:
     messages, has_more = await MessageRepository(session).list(
@@ -71,6 +72,7 @@ async def message_page_context(
         message_type=message_type,
         entity_query=entity_query,
         analysis_status=analysis_status,
+        message_id=message_id,
     )
     next_cursor = (
         {"cursor_sent_at": messages[-1].published_at.isoformat(), "cursor_id": messages[-1].id}
@@ -87,6 +89,7 @@ async def message_page_context(
         "message_type": message_type or "",
         "entity_query": entity_query or "",
         "analysis_status": analysis_status or "",
+        "message_id": message_id or "",
     }
     pagination_values = {key: value for key, value in filters.items() if value != ""}
     if next_cursor:
@@ -293,6 +296,7 @@ async def messages_page(
     message_type: str | None = None,
     entity_query: str | None = None,
     analysis_status: str | None = None,
+    message_id: int | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     context = await message_page_context(
@@ -307,6 +311,7 @@ async def messages_page(
         message_type=message_type,
         entity_query=entity_query,
         analysis_status=analysis_status,
+        message_id=message_id,
         session=session,
     )
     context["display_timezone"] = settings.display_timezone
@@ -357,6 +362,17 @@ async def profiles_page(
         filters.append(TransportProfile.id.in_(vehicle_query))
     if query:
         filters.append(TransportProfile.canonical_label.ilike(f"%{query}%"))
+    if has_conflicts:
+        filters.append(
+            TransportProfile.id.in_(
+                select(ProfileOccurrence.profile_id)
+                .join(
+                    ProfileResolutionConflict,
+                    ProfileResolutionConflict.message_id == ProfileOccurrence.message_id,
+                )
+                .where(ProfileResolutionConflict.status == "open")
+            )
+        )
     candidate_ids = list(
         (
             await session.scalars(
@@ -429,7 +445,10 @@ async def profiles_page(
 
 @router.get("/profiles/{profile_id}", response_class=HTMLResponse)
 async def profile_page(
-    profile_id: int, request: Request, session: AsyncSession = Depends(get_session)
+    profile_id: int,
+    request: Request,
+    timeline_page: int = 1,
+    session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     profile = await session.get(TransportProfile, profile_id)
     if profile is None:
@@ -443,13 +462,19 @@ async def profile_page(
             )
         ).all()
     )
+    timeline_page = max(timeline_page, 1)
+    timeline_limit = 50
+    occurrence_total = await session.scalar(
+        select(func.count(ProfileOccurrence.id)).where(ProfileOccurrence.profile_id == profile_id)
+    ) or 0
     occurrences = (
         await session.execute(
             select(ProfileOccurrence, TelegramMessage)
             .join(TelegramMessage)
             .where(ProfileOccurrence.profile_id == profile_id)
             .order_by(TelegramMessage.published_at.desc())
-            .limit(100)
+            .offset((timeline_page - 1) * timeline_limit)
+            .limit(timeline_limit)
         )
     ).all()
     vehicles = (
@@ -466,7 +491,7 @@ async def profile_page(
     scores = await scores_for_profiles(
         session, [profile_id], generated_at=datetime.now(timezone.utc)
     )
-    relations = list(
+    relation_items = list(
         (
             await session.scalars(
                 select(ProfileRelation).where(
@@ -478,6 +503,33 @@ async def profile_page(
             )
         ).all()
     )
+    related_ids = {
+        relation.right_profile_id if relation.left_profile_id == profile_id else relation.left_profile_id
+        for relation in relation_items
+    }
+    related_profiles = {
+        item.id: item
+        for item in (
+            await session.scalars(select(TransportProfile).where(TransportProfile.id.in_(related_ids)))
+        ).all()
+    }
+    relations = [
+        (
+            relation,
+            related_profiles[
+                relation.right_profile_id
+                if relation.left_profile_id == profile_id
+                else relation.left_profile_id
+            ],
+        )
+        for relation in relation_items
+        if (
+            relation.right_profile_id
+            if relation.left_profile_id == profile_id
+            else relation.left_profile_id
+        )
+        in related_profiles
+    ]
     conflicts = list(
         (
             await session.scalars(
@@ -501,6 +553,11 @@ async def profile_page(
             "vehicles": vehicles,
             "priority": scores[profile_id],
             "relations": relations,
+            "timeline": {
+                "page": timeline_page,
+                "has_more": timeline_page * timeline_limit < occurrence_total,
+                "total": occurrence_total,
+            },
             "conflicts": conflicts,
             "display_timezone": settings.display_timezone,
         },
@@ -509,9 +566,12 @@ async def profile_page(
 
 @router.get("/vehicles", response_class=HTMLResponse)
 async def vehicles_page(
-    request: Request, query: str | None = None, session: AsyncSession = Depends(get_session)
+    request: Request,
+    query: str | None = None,
+    page: int = 1,
+    session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
-    statement = select(Vehicle).order_by(Vehicle.last_seen_at.desc()).limit(100)
+    statement = select(Vehicle)
     if query:
         statement = statement.where(
             or_(
@@ -521,7 +581,18 @@ async def vehicles_page(
                 Vehicle.model.ilike(f"%{query}%"),
             )
         )
-    vehicles = list((await session.scalars(statement)).all())
+    page = max(page, 1)
+    limit = 50
+    total = await session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    vehicles = list(
+        (
+            await session.scalars(
+                statement.order_by(Vehicle.last_seen_at.desc())
+                .offset((page - 1) * limit)
+                .limit(limit)
+            )
+        ).all()
+    )
     profile_counts = (
         dict(
             (
@@ -542,6 +613,7 @@ async def vehicles_page(
             "vehicles": vehicles,
             "profile_counts": profile_counts,
             "query": query or "",
+            "pagination": {"page": page, "has_more": page * limit < total, "total": total},
             "display_timezone": settings.display_timezone,
         },
     )
@@ -549,20 +621,29 @@ async def vehicles_page(
 
 @router.get("/vehicles/{vehicle_id}", response_class=HTMLResponse)
 async def vehicle_page(
-    vehicle_id: int, request: Request, session: AsyncSession = Depends(get_session)
+    vehicle_id: int,
+    request: Request,
+    timeline_page: int = 1,
+    session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     vehicle = await session.get(Vehicle, vehicle_id)
     if vehicle is None:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Vehicle not found")
+    timeline_page = max(timeline_page, 1)
+    timeline_limit = 50
+    observation_total = await session.scalar(
+        select(func.count(VehicleObservation.id)).where(VehicleObservation.vehicle_id == vehicle_id)
+    ) or 0
     observations = (
         await session.execute(
             select(VehicleObservation, TelegramMessage)
             .join(TelegramMessage)
             .where(VehicleObservation.vehicle_id == vehicle_id)
             .order_by(VehicleObservation.observed_at.desc())
-            .limit(100)
+            .offset((timeline_page - 1) * timeline_limit)
+            .limit(timeline_limit)
         )
     ).all()
     profiles = (
@@ -579,6 +660,11 @@ async def vehicle_page(
             "vehicle": vehicle,
             "observations": observations,
             "profiles": profiles,
+            "timeline": {
+                "page": timeline_page,
+                "has_more": timeline_page * timeline_limit < observation_total,
+                "total": observation_total,
+            },
             "display_timezone": settings.display_timezone,
         },
     )
@@ -822,22 +908,33 @@ async def review_message_page(
 async def conflicts_page(
     request: Request,
     status: str = "open",
+    page: int = 1,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
     if status not in {"open", "reviewed", "dismissed"}:
         raise HTTPException(status_code=422, detail="Unsupported conflict status")
+    page = max(page, 1)
+    limit = 50
+    statement = (
+        select(ProfileResolutionConflict)
+        .where(ProfileResolutionConflict.status == status)
+        .order_by(ProfileResolutionConflict.created_at.desc())
+    )
+    total = await session.scalar(select(func.count()).select_from(statement.subquery())) or 0
     conflicts = list(
         (
             await session.scalars(
-                select(ProfileResolutionConflict)
-                .where(ProfileResolutionConflict.status == status)
-                .order_by(ProfileResolutionConflict.created_at.desc())
-                .limit(200)
+                statement.offset((page - 1) * limit).limit(limit)
             )
         ).all()
     )
     return templates.TemplateResponse(
         request,
         "pages/conflicts.html",
-        {"conflicts": conflicts, "status": status, "display_timezone": settings.display_timezone},
+        {
+            "conflicts": conflicts,
+            "status": status,
+            "pagination": {"page": page, "has_more": page * limit < total, "total": total},
+            "display_timezone": settings.display_timezone,
+        },
     )
