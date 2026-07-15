@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.review import service as review_service
 from app.evaluation.cli import _component, run
 from app.evaluation.datasets import dataset_metadata
 from app.evaluation.metrics import entity_metrics
@@ -12,6 +13,9 @@ from app.review.service import (
     normalize_phone,
     normalize_route,
     normalize_vehicle,
+    ReviewFilters,
+    select_review_queue,
+    source_text_hash,
     stratified_sample,
 )
 
@@ -76,6 +80,88 @@ def test_stratified_sampling_is_reproducible_and_balanced() -> None:
     assert first == stratified_sample(rows, limit=2, seed=42)
     assert len(first) == 2
     assert 3 in first
+
+
+class ReviewQueueSession:
+    def __init__(self, rows: list[tuple[object, ...]]) -> None:
+        self.rows = rows
+
+    async def execute(self, statement: object) -> object:
+        del statement
+
+        class Result:
+            def __init__(self, rows: list[tuple[object, ...]]) -> None:
+                self.rows = rows
+
+            def all(self) -> list[tuple[object, ...]]:
+                return self.rows
+
+        return Result(self.rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("annotation_hash", "expected_ids"),
+    [
+        (source_text_hash("current text"), []),
+        (source_text_hash("previous text"), [1]),
+    ],
+)
+async def test_stale_review_queue_uses_annotation_hash(
+    annotation_hash: str, expected_ids: list[int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_rows: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        review_service,
+        "stratified_sample",
+        lambda rows, **_kwargs: captured_rows.extend(rows) or [row[0] for row in rows],
+    )
+    session = ReviewQueueSession(
+        [(1, 10, "driver_offer", 0.9, "current text", 0, False, False, annotation_hash, False, True)]
+    )
+
+    result = await select_review_queue(session, ReviewFilters(annotation_status="stale"), limit=10, seed=1)
+
+    assert result == expected_ids
+    expected_rows = [
+        (1, 10, "driver_offer", 0.9, "current text", 0, False, False, False, True)
+    ] if expected_ids else []
+    assert captured_rows == expected_rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_media, has_plate", [(False, True), (True, False)])
+async def test_review_queue_preserves_media_and_plate_flags(
+    has_media: bool, has_plate: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured_rows: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        review_service,
+        "stratified_sample",
+        lambda rows, **_kwargs: captured_rows.extend(rows) or [row[0] for row in rows],
+    )
+    session = ReviewQueueSession(
+        [
+            (
+                1,
+                10,
+                "driver_offer",
+                0.9,
+                "current text",
+                0,
+                False,
+                False,
+                source_text_hash("current text"),
+                has_media,
+                has_plate,
+            )
+        ]
+    )
+
+    result = await select_review_queue(session, ReviewFilters(), limit=10, seed=1)
+
+    assert result == [1]
+    assert captured_rows[0][-2:] == (has_media, has_plate)
 
 
 def test_human_reviewed_dataset_cannot_claim_false_human_status(tmp_path) -> None:

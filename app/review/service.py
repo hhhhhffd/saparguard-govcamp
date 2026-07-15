@@ -251,13 +251,40 @@ async def select_review_queue(
             .order_by(TelegramMessage.id)
         )
     ).all()
-    if filters.annotation_status == "stale":
-        rows = [
-            row[:-1] for row in rows if row[-1] is not None and row[-1] != source_text_hash(row[4])
-        ]
-    else:
-        rows = [row[:-1] for row in rows]
-    return stratified_sample(rows, limit=limit, seed=seed)
+    sampling_rows = []
+    for row in rows:
+        (
+            message_id,
+            source,
+            message_type,
+            confidence,
+            text,
+            phone_count,
+            has_vehicle,
+            has_route,
+            annotation_hash,
+            has_media,
+            has_plate,
+        ) = row
+        if filters.annotation_status == "stale" and (
+            annotation_hash is None or annotation_hash == source_text_hash(text)
+        ):
+            continue
+        sampling_rows.append(
+            (
+                message_id,
+                source,
+                message_type,
+                confidence,
+                text,
+                phone_count,
+                has_vehicle,
+                has_route,
+                has_media,
+                has_plate,
+            )
+        )
+    return stratified_sample(sampling_rows, limit=limit, seed=seed)
 
 
 def stratified_sample(rows: list[object], *, limit: int, seed: int) -> list[int]:
