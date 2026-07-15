@@ -2,6 +2,8 @@
 
 @source "../../app/web/templates";
 
+.complaint-form-card{max-width:760px}.complaint-location{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:10px}.complaint-location label{min-width:0}.complaint-location .secondary-button{border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text);padding:10px 14px;font-size:13px;font-weight:650}.complaint-location .secondary-button:hover{border-color:var(--color-primary);background:var(--color-primary-soft);color:var(--color-primary-hover)}.form-stack .complaint-description textarea{min-height:112px;resize:none;overflow:hidden}
+
 .button{display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:var(--color-primary);color:#fff;padding:10px 14px;font-size:13px;font-weight:650;box-shadow:0 1px 2px rgb(45 45 44 / 12%)}.button:hover{background:var(--color-primary-hover);color:#fff;box-shadow:0 3px 8px rgb(45 45 44 / 16%)}
 
 .sidebar-bottom{display:grid;gap:10px}.sidebar-bottom .role-badge{width:max-content;margin:0}.logout-button{width:100%;border:1px solid #e4a39d;border-radius:6px;background:#fff0ee;color:#9d2e28;padding:9px 12px;text-align:left;font-size:13px;font-weight:650}.logout-button:hover{border-color:#c54a43;background:#fde2df;color:#7e241f}.sidebar-bottom .locale-switch{width:100%;padding:3px;gap:3px}.sidebar-bottom .locale-switch button{flex:1;padding:8px 6px;font-size:13px;font-weight:650}.sidebar-bottom .locale-switch .selected{background:var(--color-primary);color:#fff}

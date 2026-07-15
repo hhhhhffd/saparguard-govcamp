@@ -23,8 +23,14 @@ from app.web.templating import templates
 
 router = APIRouter(prefix="/complaints")
 PAGE_SIZE = 25
-MAX_COMPLAINT_SUBJECT_LENGTH = 200
 MAX_COMPLAINT_LOCATION_LENGTH = 500
+COMPLAINT_TOPICS = (
+    "dangerous_driving",
+    "traffic_violation",
+    "road_infrastructure",
+    "illegal_parking",
+    "other",
+)
 
 
 def _is_staff(user: AppUser) -> bool:
@@ -43,13 +49,14 @@ def _complaint_form_context(
     subject: str = "",
     description: str = "",
     location_text: str = "",
-) -> dict[str, str]:
+) -> dict[str, object]:
     locale = request.state.locale
     return {
         "error": translate(error_key, locale) if error_key else "",
         "subject": subject,
         "description": description,
         "location_text": location_text,
+        "complaint_topics": COMPLAINT_TOPICS,
     }
 
 
@@ -93,6 +100,7 @@ async def complaints_list(
             "statuses": list(ComplaintStatus),
             "filters": {"status": status or "", "query": query or "", "page": page},
             "pagination": {"page": page, "has_more": page * PAGE_SIZE < total, "total": total},
+            "complaint_topics": COMPLAINT_TOPICS,
         },
     )
 
@@ -102,7 +110,7 @@ async def complaint_create_page(
     request: Request, user: AppUser = Depends(current_user)
 ) -> HTMLResponse:
     _require_citizen(user)
-    return templates.TemplateResponse(request, "pages/complaint_form.html", {})
+    return templates.TemplateResponse(request, "pages/complaint_form.html", _complaint_form_context(request))
 
 
 @router.post("/new", response_class=HTMLResponse, response_model=None)
@@ -118,26 +126,13 @@ async def complaint_create(
     subject = subject.strip()
     description = description.strip()
     location_text = location_text.strip() if location_text else ""
-    if not subject:
+    if subject not in COMPLAINT_TOPICS:
         return templates.TemplateResponse(
             request,
             "pages/complaint_form.html",
             _complaint_form_context(
                 request,
-                error_key="complaints.error_subject_required",
-                subject=subject,
-                description=description,
-                location_text=location_text,
-            ),
-            status_code=422,
-        )
-    if len(subject) > MAX_COMPLAINT_SUBJECT_LENGTH:
-        return templates.TemplateResponse(
-            request,
-            "pages/complaint_form.html",
-            _complaint_form_context(
-                request,
-                error_key="complaints.error_subject_too_long",
+                error_key="complaints.error_subject_invalid",
                 subject=subject,
                 description=description,
                 location_text=location_text,
@@ -226,6 +221,7 @@ async def complaint_detail(
             "history": history_rows,
             "is_staff": is_staff,
             "statuses": list(ComplaintStatus),
+            "complaint_topics": COMPLAINT_TOPICS,
         },
     )
 

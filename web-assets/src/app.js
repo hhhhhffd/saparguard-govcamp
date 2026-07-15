@@ -53,6 +53,54 @@ function installGraphSearch(cy) {
   });
 }
 
+function initComplaintForm() {
+  const form = document.querySelector("[data-complaint-form]");
+  if (!(form instanceof HTMLFormElement)) return;
+
+  const topic = form.querySelector("[data-complaint-topic]");
+  const description = form.querySelector("[data-complaint-description]");
+  const textarea = form.querySelector("[data-complaint-description-input]");
+  const location = form.querySelector("[data-complaint-location]");
+  const geolocationButton = form.querySelector("[data-complaint-geolocation]");
+  if (!(topic instanceof HTMLSelectElement) || !(description instanceof HTMLElement) || !(textarea instanceof HTMLTextAreaElement)) return;
+
+  const resizeDescription = () => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+  const updateDescription = () => {
+    const option = topic.selectedOptions.item(0);
+    const visible = Boolean(topic.value);
+    description.hidden = !visible;
+    textarea.disabled = !visible;
+    textarea.placeholder = option?.dataset.descriptionPlaceholder || form.dataset.descriptionDefault || "";
+    if (visible) resizeDescription();
+  };
+
+  topic.addEventListener("change", updateDescription);
+  textarea.addEventListener("input", resizeDescription);
+  updateDescription();
+
+  geolocationButton?.addEventListener("click", () => {
+    if (!(location instanceof HTMLInputElement) || !navigator.geolocation) {
+      showError(form.dataset.locationUnavailable || "");
+      return;
+    }
+    geolocationButton.disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        location.value = `${form.dataset.locationPrefix}: ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
+        geolocationButton.disabled = false;
+      },
+      () => {
+        showError(form.dataset.locationUnavailable || "");
+        geolocationButton.disabled = false;
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    );
+  });
+}
+
 async function initGraph() {
   const container = document.querySelector("#relationship-graph");
   if (!container) return;
@@ -105,3 +153,4 @@ async function initGraph() {
 }
 
 initGraph();
+initComplaintForm();
