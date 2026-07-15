@@ -1,4 +1,12 @@
 from app.database.models.base import Base
+from app.database.models.accounts import (
+    AppUser,
+    Complaint,
+    ComplaintStatus,
+    ComplaintStatusHistory,
+    RegistrationSource,
+    UserRole,
+)
 from app.database.models.analysis import (
     ExtractedEntity,
     MessageAnalysis,
@@ -36,6 +44,10 @@ from app.database.models.telegram import (
 
 __all__ = [
     "Base",
+    "AppUser",
+    "Complaint",
+    "ComplaintStatus",
+    "ComplaintStatusHistory",
     "AnnotationPhone",
     "AnnotationRoute",
     "AnnotationVehicle",
@@ -58,9 +70,11 @@ __all__ = [
     "ProfileResolutionJob",
     "ProfileVehicleLink",
     "ProfileVehicleLinkObservation",
+    "RegistrationSource",
     "TransportProfile",
     "Vehicle",
     "VehicleObservation",
+    "UserRole",
     "TelegramChat",
     "TelegramMessage",
     "TelegramUser",

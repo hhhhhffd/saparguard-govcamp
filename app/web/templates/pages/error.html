@@ -1,0 +1,1 @@
+{% extends "layouts/auth.html" %}{% block content %}<section class="auth-card"><a class="brand" href="/auth/login">Sapar<span>Guard</span></a><h1>{{ title }}</h1><p>{{ message }}</p>{% if user %}<p><a href="{{ home_url }}">{{ t('common.back') }}</a></p>{% else %}<p><a href="/auth/login">{{ t('auth.login') }}</a></p>{% endif %}</section>{% endblock %}
