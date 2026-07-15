@@ -115,7 +115,7 @@ def test_login_shows_localized_google_fallback() -> None:
     assert "accounts.google.com/gsi/client" not in response.text
 
 
-def test_login_uses_official_google_identity_widget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_login_uses_server_managed_google_oauth_link(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.main import app
     from app.web.routes import auth
 
@@ -125,9 +125,9 @@ def test_login_uses_official_google_identity_widget(monkeypatch: pytest.MonkeyPa
     response = TestClient(app).get("/auth/login")
 
     assert response.status_code == 200
-    assert "accounts.google.com/gsi/client" in response.text
-    assert "data-google-sign-in" in response.text
-    assert 'href="/auth/google"' not in response.text
+    assert 'href="/auth/google"' in response.text
+    assert "accounts.google.com/gsi/client" not in response.text
+    assert "data-google-sign-in" not in response.text
 
 
 def test_account_route_requires_sign_in() -> None:
