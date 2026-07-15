@@ -45,7 +45,7 @@ On first API start, `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` create on
 ## Pages and API
 
 - Public: `/auth/login`, `/auth/register`, Google callback, static files and `/health`.
-- Citizen: `/complaints`, `/complaints/new`, `/complaints/{id}`, `/auth/me`.
+- Citizen: `/account`, `/complaints`, `/complaints/new`, `/complaints/{id}`, `/auth/me`.
 - Staff: `/`, `/sources`, `/messages`, `/review`, `/profiles`, `/vehicles`, `/graph`, `/conflicts`, `/quality` and internal `/api/*`.
 - Administrator: `/admin/users`.
 

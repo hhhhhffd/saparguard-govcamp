@@ -130,6 +130,11 @@ async def me(request: Request) -> dict[str, object]:
     }
 
 
+@router.get("/account", response_class=HTMLResponse)
+async def account_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "pages/account.html", {"user": request.state.user})
+
+
 @router.get("/google")
 async def google_login(request: Request) -> RedirectResponse:
     client = google_client()
