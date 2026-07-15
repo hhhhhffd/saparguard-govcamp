@@ -81,6 +81,7 @@ async def add_web_security_headers(request: Request, call_next):
         "/auth/register",
         "/auth/google",
         "/auth/google/callback",
+        "/ui/actions/locale",
     }
     if path.startswith("/static") or path in public_paths:
         response = await call_next(request)

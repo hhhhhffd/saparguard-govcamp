@@ -115,6 +115,20 @@ def test_login_shows_localized_google_fallback() -> None:
     assert "accounts.google.com/gsi/client" not in response.text
 
 
+def test_anonymous_user_can_switch_interface_language() -> None:
+    from app.main import app
+
+    response = TestClient(app).post(
+        "/ui/actions/locale",
+        data={"locale": "ru", "next_url": "/auth/login"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/auth/login"
+    assert "saparguard_locale=ru" in response.headers["set-cookie"]
+
+
 def test_login_uses_server_managed_google_oauth_link(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.main import app
     from app.web.routes import auth
