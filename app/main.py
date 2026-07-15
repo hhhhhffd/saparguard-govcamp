@@ -109,6 +109,7 @@ async def add_web_security_headers(request: Request, call_next):
         path.startswith("/complaints")
         or path.startswith("/account")
         or path == "/auth/me"
+        or path == "/auth/account"
         or path == "/auth/logout"
         or path == "/ui/actions/locale"
     ):
@@ -160,7 +161,9 @@ def _apply_web_security_headers(request: Request, response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; "
-        "form-action 'self'; img-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'"
+        "form-action 'self'; img-src 'self'; object-src 'none'; "
+        "script-src 'self' https://accounts.google.com; style-src 'self'; "
+        "frame-src https://accounts.google.com; connect-src 'self' https://accounts.google.com"
     )
     return response
 

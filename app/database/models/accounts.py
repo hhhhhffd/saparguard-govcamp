@@ -37,9 +37,7 @@ class AppUser(Base):
     __tablename__ = "app_users"
 
     __table_args__ = (
-        CheckConstraint(
-            "role IN ('citizen', 'worker', 'admin')", name="ck_app_users_role"
-        ),
+        CheckConstraint("role IN ('citizen', 'worker', 'admin')", name="ck_app_users_role"),
         CheckConstraint(
             "registration_source IN ('local', 'google')",
             name="ck_app_users_registration_source",
@@ -79,7 +77,9 @@ class Complaint(Base):
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     location_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default=ComplaintStatus.NEW.value)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=ComplaintStatus.NEW.value
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status_changed_by_id: Mapped[int | None] = mapped_column(

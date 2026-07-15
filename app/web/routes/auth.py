@@ -23,6 +23,7 @@ from app.database.session import get_session
 from app.web.templating import templates
 
 router = APIRouter(prefix="/auth")
+account_router = APIRouter()
 
 
 def _redirect(path: str, **values: str) -> RedirectResponse:
@@ -31,7 +32,7 @@ def _redirect(path: str, **values: str) -> RedirectResponse:
 
 
 def _signed_in_response(user: AppUser) -> RedirectResponse:
-    destination = "/complaints" if user.role == UserRole.CITIZEN.value else "/"
+    destination = "/account" if user.role == UserRole.CITIZEN.value else "/"
     response = RedirectResponse(destination, status_code=303)
     response.set_cookie(
         settings.jwt_cookie_name,
@@ -46,7 +47,12 @@ def _signed_in_response(user: AppUser) -> RedirectResponse:
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: str | None = None, registered: bool = False) -> HTMLResponse:
+async def login_page(
+    request: Request,
+    error: str | None = None,
+    registered: bool = False,
+    email: str = "",
+) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "pages/login.html",
@@ -54,6 +60,8 @@ async def login_page(request: Request, error: str | None = None, registered: boo
             "error": error,
             "registered": registered,
             "google_available": google_auth_available(),
+            "email": email,
+            "google_client_id": settings.google_client_id or "",
         },
     )
 
@@ -61,7 +69,7 @@ async def login_page(request: Request, error: str | None = None, registered: boo
 @router.post("/login", response_class=HTMLResponse, response_model=None)
 async def login(
     request: Request,
-    email: str = Form(...),
+    email: str = Form(default=""),
     password: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse | RedirectResponse:
@@ -75,6 +83,8 @@ async def login(
                 "error": "Неверный email, пароль или доступ заблокирован.",
                 "registered": False,
                 "google_available": google_auth_available(),
+                "google_client_id": settings.google_client_id or "",
+                "email": email,
             },
             status_code=401,
         )
@@ -82,14 +92,18 @@ async def login(
 
 
 @router.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, error: str | None = None) -> HTMLResponse:
-    return templates.TemplateResponse(request, "pages/register.html", {"error": error})
+async def register_page(
+    request: Request, error: str | None = None, email: str = ""
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "pages/register.html", {"error": error, "email": email}
+    )
 
 
 @router.post("/register", response_class=HTMLResponse, response_model=None)
 async def register(
     request: Request,
-    email: str = Form(...),
+    email: str = Form(default=""),
     password: str = Form(...),
     password_confirmation: str = Form(...),
     session: AsyncSession = Depends(get_session),
@@ -98,7 +112,7 @@ async def register(
         return templates.TemplateResponse(
             request,
             "pages/register.html",
-            {"error": "Пароли не совпадают."},
+            {"error": "Пароли не совпадают.", "email": email},
             status_code=422,
         )
     try:
@@ -106,7 +120,7 @@ async def register(
             await register_local_user(session, email=email, password=password)
     except AuthenticationError as error:
         return templates.TemplateResponse(
-            request, "pages/register.html", {"error": str(error)}, status_code=422
+            request, "pages/register.html", {"error": str(error), "email": email}, status_code=422
         )
     return _redirect("/auth/login", registered="1")
 
@@ -130,9 +144,14 @@ async def me(request: Request) -> dict[str, object]:
     }
 
 
-@router.get("/account", response_class=HTMLResponse)
+@account_router.get("/account", response_class=HTMLResponse)
 async def account_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "pages/account.html", {"user": request.state.user})
+
+
+@router.get("/account")
+async def legacy_account_page() -> RedirectResponse:
+    return RedirectResponse("/account", status_code=303)
 
 
 @router.get("/google")

@@ -22,7 +22,7 @@ All working pages and internal `/api/*` endpoints require a signed JWT stored in
 
 Citizens cannot access collected Telegram data, profiles, vehicles, graph, review, conflicts, sources, quality or internal API. Workers cannot open administration. Server-side checks return an HTML 403 page for browser requests and JSON 403 for API requests.
 
-Local registration is email-only and always creates an active citizen account. Passwords must contain at least 12 characters and are stored only as bcrypt hashes. Google OAuth/OIDC uses a verified Google email; matching local accounts are linked instead of duplicated. If Google is unconfigured, the login screen remains usable and shows the disabled `😢 Не работает...` fallback.
+Local registration is email-only and always creates an active citizen account. Email addresses are validated and normalized on the server for registration, local login, administration, Google linking and bootstrap. Passwords must contain at least 12 characters and are stored only as bcrypt hashes. Google OAuth/OIDC uses a verified Google email; matching local accounts are linked instead of duplicated. When configured, the login page renders the official Google Identity Services button; otherwise it keeps local login usable with the localized disabled fallback.
 
 An administrator can search, filter, create, edit, block, soft-delete and assign roles to accounts. Soft deletion preserves complaint and action history. The last active administrator cannot be deleted, blocked or demoted.
 
@@ -40,12 +40,13 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=
 ```
 
-On first API start, `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` create one active administrator. The password must be at least 12 characters. Bootstrap is idempotent: an existing account is neither recreated nor has its password rotated. Do not place real passwords, Google secrets, Telegram sessions or review exports in Git.
+On first API start, `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` create one active administrator. The password must be at least 12 characters. Bootstrap is idempotent for an existing active, non-deleted administrator and never rotates its password. If the configured email belongs to a citizen, worker, blocked or deleted account, startup stops with a configuration error: choose another `DEFAULT_ADMIN_EMAIL` or correct the conflicting account. Do not place real passwords, Google secrets, Telegram sessions or review exports in Git.
 
 ## Pages and API
 
 - Public: `/auth/login`, `/auth/register`, Google callback, static files and `/health`.
-- Citizen: `/account`, `/complaints`, `/complaints/new`, `/complaints/{id}`, `/auth/me`.
+- All authenticated users: `/account` (the legacy `/auth/account` redirects here), `/auth/me`.
+- Citizen: `/complaints`, `/complaints/new`, `/complaints/{id}`.
 - Staff: `/`, `/sources`, `/messages`, `/review`, `/profiles`, `/vehicles`, `/graph`, `/conflicts`, `/quality` and internal `/api/*`.
 - Administrator: `/admin/users`.
 

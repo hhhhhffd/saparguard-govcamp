@@ -12,7 +12,9 @@ from app.database.models import AppUser, UserRole
 def current_user(request: Request) -> AppUser:
     user = getattr(request.state, "user", None)
     if not isinstance(user, AppUser):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
     return user
 
 

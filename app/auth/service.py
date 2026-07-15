@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
+from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,8 +27,18 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def normalize_and_validate_email(email: str) -> tuple[str, str]:
+    """Return a safe display value and stable value used for uniqueness checks."""
+    try:
+        validated = validate_email(email.strip(), check_deliverability=False)
+    except EmailNotValidError as error:
+        raise AuthenticationError("Укажите корректный email.") from error
+    return validated.normalized, validated.normalized.casefold()
+
+
 def normalize_email(email: str) -> str:
-    return email.strip().casefold()
+    """Return the validated normalized email retained by legacy callers."""
+    return normalize_and_validate_email(email)[1]
 
 
 def validate_password(password: str) -> None:
@@ -92,7 +103,7 @@ async def get_active_user_by_id(session: AsyncSession, user_id: int) -> AppUser 
 
 async def register_local_user(session: AsyncSession, *, email: str, password: str) -> AppUser:
     validate_password(password)
-    normalized_email = normalize_email(email)
+    display_email, normalized_email = normalize_and_validate_email(email)
     existing = await session.scalar(
         select(AppUser).where(AppUser.normalized_email == normalized_email)
     )
@@ -100,7 +111,7 @@ async def register_local_user(session: AsyncSession, *, email: str, password: st
         raise AuthenticationError("Пользователь с таким email уже существует.")
     now = utc_now()
     user = AppUser(
-        email=email.strip(),
+        email=display_email,
         normalized_email=normalized_email,
         password_hash=hash_password(password),
         role=UserRole.CITIZEN.value,
@@ -117,9 +128,11 @@ async def register_local_user(session: AsyncSession, *, email: str, password: st
 async def authenticate_local_user(
     session: AsyncSession, *, email: str, password: str
 ) -> AppUser | None:
-    user = await session.scalar(
-        select(AppUser).where(AppUser.normalized_email == normalize_email(email))
-    )
+    try:
+        normalized_email = normalize_email(email)
+    except AuthenticationError:
+        return None
+    user = await session.scalar(select(AppUser).where(AppUser.normalized_email == normalized_email))
     if user is None or not user.is_active or user.deleted_at is not None:
         return None
     if not verify_password(password, user.password_hash):
@@ -140,7 +153,7 @@ async def link_google_account(
     """Link a verified Google identity to an existing account or create a citizen."""
     if not email_verified:
         raise AuthenticationError("Google не подтвердил email-адрес.")
-    normalized_email = normalize_email(email)
+    display_email, normalized_email = normalize_and_validate_email(email)
     user = await session.scalar(
         select(AppUser).where(AppUser.google_account_id == google_account_id)
     )
@@ -155,7 +168,7 @@ async def link_google_account(
         else:
             now = utc_now()
             user = AppUser(
-                email=email.strip(),
+                email=display_email,
                 normalized_email=normalized_email,
                 google_account_id=google_account_id,
                 role=UserRole.CITIZEN.value,
@@ -181,17 +194,33 @@ async def bootstrap_default_admin(session: AsyncSession) -> AppUser | None:
     if not email and not password:
         return None
     if not email or not password:
-        raise RuntimeError("DEFAULT_ADMIN_EMAIL and DEFAULT_ADMIN_PASSWORD must be configured together")
+        raise RuntimeError(
+            "DEFAULT_ADMIN_EMAIL and DEFAULT_ADMIN_PASSWORD must be configured together"
+        )
     validate_password(password)
-    normalized_email = normalize_email(email)
+    display_email, normalized_email = normalize_and_validate_email(email)
     existing = await session.scalar(
         select(AppUser).where(AppUser.normalized_email == normalized_email)
     )
     if existing is not None:
-        return existing
+        if (
+            existing.role == UserRole.ADMIN.value
+            and existing.is_active
+            and existing.deleted_at is None
+        ):
+            return existing
+        state = []
+        state.append(f"role={existing.role}")
+        state.append("active" if existing.is_active else "blocked")
+        state.append("deleted" if existing.deleted_at is not None else "not deleted")
+        raise RuntimeError(
+            "DEFAULT_ADMIN_EMAIL conflicts with existing account "
+            f"{display_email} ({', '.join(state)}). Choose another DEFAULT_ADMIN_EMAIL "
+            "or correct the account through the database or an administrator."
+        )
     now = utc_now()
     admin = AppUser(
-        email=email.strip(),
+        email=display_email,
         normalized_email=normalized_email,
         password_hash=hash_password(password),
         role=UserRole.ADMIN.value,

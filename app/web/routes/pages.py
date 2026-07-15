@@ -19,6 +19,7 @@ from app.database.models import (
     ProfileIdentifier,
     ProfileOccurrence,
     ProfileRelation,
+    ProfileRelationObservation,
     ProfileResolutionConflict,
     ProfileResolutionJob,
     ProfileVehicleLink,
@@ -30,6 +31,7 @@ from app.database.models import (
     VehicleObservation,
 )
 from app.review.service import (
+    VALID_MESSAGE_TYPES,
     annotation_is_stale,
     ReviewFilters,
     get_review_message,
@@ -42,6 +44,36 @@ from app.web.templating import templates
 
 router = APIRouter()
 DEFAULT_PAGE_SIZE = 50
+
+
+def _review_filters_context(request: Request) -> dict[str, str]:
+    return {
+        key: request.query_params.get(key, "")
+        for key in (
+            "source_id",
+            "annotation_status",
+            "date_from",
+            "date_to",
+            "message_type",
+            "confidence_min",
+            "confidence_max",
+            "has_phone",
+            "has_route",
+            "has_vehicle",
+            "has_media",
+            "has_plate",
+            "processing_failed",
+            "unannotated_only",
+            "include_deleted",
+            "include_empty",
+            "seed",
+            "annotator",
+        )
+    }
+
+
+async def _review_sources(session: AsyncSession) -> list[TelegramChat]:
+    return [source for source, _, _ in await SourceRepository(session).list()]
 
 
 async def message_page_context(
@@ -464,9 +496,14 @@ async def profile_page(
     )
     timeline_page = max(timeline_page, 1)
     timeline_limit = 50
-    occurrence_total = await session.scalar(
-        select(func.count(ProfileOccurrence.id)).where(ProfileOccurrence.profile_id == profile_id)
-    ) or 0
+    occurrence_total = (
+        await session.scalar(
+            select(func.count(ProfileOccurrence.id)).where(
+                ProfileOccurrence.profile_id == profile_id
+            )
+        )
+        or 0
+    )
     occurrences = (
         await session.execute(
             select(ProfileOccurrence, TelegramMessage)
@@ -504,32 +541,50 @@ async def profile_page(
         ).all()
     )
     related_ids = {
-        relation.right_profile_id if relation.left_profile_id == profile_id else relation.left_profile_id
+        relation.right_profile_id
+        if relation.left_profile_id == profile_id
+        else relation.left_profile_id
         for relation in relation_items
     }
     related_profiles = {
         item.id: item
         for item in (
-            await session.scalars(select(TransportProfile).where(TransportProfile.id.in_(related_ids)))
+            await session.scalars(
+                select(TransportProfile).where(TransportProfile.id.in_(related_ids))
+            )
         ).all()
     }
-    relations = [
-        (
-            relation,
-            related_profiles[
-                relation.right_profile_id
-                if relation.left_profile_id == profile_id
-                else relation.left_profile_id
-            ],
-        )
-        for relation in relation_items
-        if (
+    relations = []
+    for relation in relation_items:
+        related_id = (
             relation.right_profile_id
             if relation.left_profile_id == profile_id
             else relation.left_profile_id
         )
-        in related_profiles
-    ]
+        related_profile = related_profiles.get(related_id)
+        if related_profile is None:
+            continue
+        evidence_message_id = await session.scalar(
+            select(ProfileRelationObservation.message_id)
+            .where(
+                ProfileRelationObservation.left_profile_id == relation.left_profile_id,
+                ProfileRelationObservation.right_profile_id == relation.right_profile_id,
+                ProfileRelationObservation.relation_type == relation.relation_type,
+            )
+            .order_by(ProfileRelationObservation.observed_at.desc())
+            .limit(1)
+        )
+        relations.append(
+            {
+                "type": relation.relation_type,
+                "profile": related_profile,
+                "confidence": relation.confidence,
+                "occurrence_count": relation.occurrence_count,
+                "first_seen_at": relation.first_seen_at,
+                "last_seen_at": relation.last_seen_at,
+                "evidence_message_id": evidence_message_id,
+            }
+        )
     conflicts = list(
         (
             await session.scalars(
@@ -633,9 +688,14 @@ async def vehicle_page(
         raise HTTPException(status_code=404, detail="Vehicle not found")
     timeline_page = max(timeline_page, 1)
     timeline_limit = 50
-    observation_total = await session.scalar(
-        select(func.count(VehicleObservation.id)).where(VehicleObservation.vehicle_id == vehicle_id)
-    ) or 0
+    observation_total = (
+        await session.scalar(
+            select(func.count(VehicleObservation.id)).where(
+                VehicleObservation.vehicle_id == vehicle_id
+            )
+        )
+        or 0
+    )
     observations = (
         await session.execute(
             select(VehicleObservation, TelegramMessage)
@@ -821,6 +881,8 @@ async def review_page(
     include_empty: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> HTMLResponse:
+    if message_type and message_type not in VALID_MESSAGE_TYPES:
+        raise HTTPException(status_code=422, detail="Недопустимый тип сообщения")
     filter_query = urlencode(
         {key: value for key, value in request.query_params.items() if key not in {"ids", "index"}}
     )
@@ -857,12 +919,20 @@ async def review_page(
                 "message": None,
                 "queue": [],
                 "index": 0,
+                "review_filters": _review_filters_context(request),
+                "review_sources": await _review_sources(session),
+                "message_types": sorted(VALID_MESSAGE_TYPES),
                 "display_timezone": settings.display_timezone,
             },
         )
     index = min(max(index, 0), len(queue) - 1)
     return await review_message_page(
-        request, queue[index], ",".join(map(str, queue)), index, session, filter_query
+        request,
+        queue[index],
+        ",".join(map(str, queue)),
+        index,
+        session,
+        filter_query,
     )
 
 
@@ -896,6 +966,9 @@ async def review_message_page(
             "queue_ids": ",".join(map(str, queue)),
             "filter_query": filter_query,
             "index": index,
+            "review_filters": _review_filters_context(request),
+            "review_sources": await _review_sources(session),
+            "message_types": sorted(VALID_MESSAGE_TYPES),
             "annotation_stale": bool(
                 message.annotation and annotation_is_stale(message.annotation, message.text)
             ),
@@ -922,11 +995,7 @@ async def conflicts_page(
     )
     total = await session.scalar(select(func.count()).select_from(statement.subquery())) or 0
     conflicts = list(
-        (
-            await session.scalars(
-                statement.offset((page - 1) * limit).limit(limit)
-            )
-        ).all()
+        (await session.scalars(statement.offset((page - 1) * limit).limit(limit))).all()
     )
     return templates.TemplateResponse(
         request,

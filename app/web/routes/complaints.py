@@ -10,12 +10,21 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import current_user
-from app.database.models import AppUser, Complaint, ComplaintStatus, ComplaintStatusHistory, UserRole
+from app.database.models import (
+    AppUser,
+    Complaint,
+    ComplaintStatus,
+    ComplaintStatusHistory,
+    UserRole,
+)
 from app.database.session import get_session
+from app.web.i18n import translate
 from app.web.templating import templates
 
 router = APIRouter(prefix="/complaints")
 PAGE_SIZE = 25
+MAX_COMPLAINT_SUBJECT_LENGTH = 200
+MAX_COMPLAINT_LOCATION_LENGTH = 500
 
 
 def _is_staff(user: AppUser) -> bool:
@@ -25,6 +34,23 @@ def _is_staff(user: AppUser) -> bool:
 def _require_citizen(user: AppUser) -> None:
     if user.role != UserRole.CITIZEN.value:
         raise HTTPException(status_code=403, detail="Only citizens can submit complaints")
+
+
+def _complaint_form_context(
+    request: Request,
+    *,
+    error_key: str | None = None,
+    subject: str = "",
+    description: str = "",
+    location_text: str = "",
+) -> dict[str, str]:
+    locale = request.state.locale
+    return {
+        "error": translate(error_key, locale) if error_key else "",
+        "subject": subject,
+        "description": description,
+        "location_text": location_text,
+    }
 
 
 @router.get("", response_class=HTMLResponse)
@@ -91,11 +117,57 @@ async def complaint_create(
     _require_citizen(user)
     subject = subject.strip()
     description = description.strip()
-    if not subject or not description:
+    location_text = location_text.strip() if location_text else ""
+    if not subject:
         return templates.TemplateResponse(
             request,
             "pages/complaint_form.html",
-            {"error": "Тема и описание обязательны."},
+            _complaint_form_context(
+                request,
+                error_key="complaints.error_subject_required",
+                subject=subject,
+                description=description,
+                location_text=location_text,
+            ),
+            status_code=422,
+        )
+    if len(subject) > MAX_COMPLAINT_SUBJECT_LENGTH:
+        return templates.TemplateResponse(
+            request,
+            "pages/complaint_form.html",
+            _complaint_form_context(
+                request,
+                error_key="complaints.error_subject_too_long",
+                subject=subject,
+                description=description,
+                location_text=location_text,
+            ),
+            status_code=422,
+        )
+    if not description:
+        return templates.TemplateResponse(
+            request,
+            "pages/complaint_form.html",
+            _complaint_form_context(
+                request,
+                error_key="complaints.error_description_required",
+                subject=subject,
+                description=description,
+                location_text=location_text,
+            ),
+            status_code=422,
+        )
+    if len(location_text) > MAX_COMPLAINT_LOCATION_LENGTH:
+        return templates.TemplateResponse(
+            request,
+            "pages/complaint_form.html",
+            _complaint_form_context(
+                request,
+                error_key="complaints.error_location_too_long",
+                subject=subject,
+                description=description,
+                location_text=location_text,
+            ),
             status_code=422,
         )
     now = datetime.now(timezone.utc)
@@ -104,7 +176,7 @@ async def complaint_create(
             author_id=user.id,
             subject=subject,
             description=description,
-            location_text=location_text.strip() if location_text else None,
+            location_text=location_text or None,
             status=ComplaintStatus.NEW.value,
             created_at=now,
             updated_at=now,

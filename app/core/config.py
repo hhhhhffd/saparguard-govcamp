@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     jwt_cookie_name: str = Field(default="saparguard_session", validation_alias="JWT_COOKIE_NAME")
     jwt_cookie_secure: bool = Field(default=False, validation_alias="JWT_COOKIE_SECURE")
     default_admin_email: str | None = Field(default=None, validation_alias="DEFAULT_ADMIN_EMAIL")
-    default_admin_password: str | None = Field(default=None, validation_alias="DEFAULT_ADMIN_PASSWORD")
+    default_admin_password: str | None = Field(
+        default=None, validation_alias="DEFAULT_ADMIN_PASSWORD"
+    )
     google_client_id: str | None = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
     google_client_secret: str | None = Field(default=None, validation_alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str | None = Field(default=None, validation_alias="GOOGLE_REDIRECT_URI")

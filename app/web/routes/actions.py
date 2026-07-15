@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -128,7 +129,9 @@ async def save_review(
     queue = [int(value) for value in ids.split(",") if value.isdigit()][:200]
     if queue:
         next_index = min(max(index, 0) + 1, len(queue) - 1)
-        suffix = f"&{return_query}" if return_query else ""
+        query_values = dict(parse_qsl(return_query, keep_blank_values=True))
+        query_values["annotator"] = annotator.strip()
+        suffix = f"&{urlencode(query_values)}"
         return RedirectResponse(
             f"/review/{queue[next_index]}?ids={ids}&index={next_index}{suffix}", status_code=303
         )
