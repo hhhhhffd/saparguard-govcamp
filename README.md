@@ -1,56 +1,170 @@
 # SaparGuard
 
-SaparGuard collects public Telegram transport announcements, processes their text and media, and provides an internal review system for observed profiles, vehicles, relationships and conflicts. It also provides a separate citizen-facing account and complaint workflow. Application users are never mixed with Telegram authors or observed transport profiles.
+SaparGuard is a GovTech decision-support prototype for monitoring public intercity transport announcements in Telegram. It turns an unstructured stream of messages and images into explainable observations: message types, contacts, routes, vehicles, licence-plate detections and evidence-backed profiles.
 
-## Architecture and pipeline
+The core problem is that transport-control staff cannot manually and consistently review a large, fast-changing flow of public announcements. SaparGuard automates collection and primary analysis, ranks observations for attention and preserves the original evidence; a responsible employee remains the final decision-maker.
 
-- FastAPI serves JSON API, Jinja2 pages and HTMX fragments; frontend assets are built locally and shipped with the image.
-- Telethon collector saves messages and media jobs to PostgreSQL.
-- Text-analysis worker extracts message type, contacts, routes, locations and vehicle information.
-- Profile-resolution worker creates observed profiles, vehicle links, relationship evidence and conflicts.
-- PostgreSQL stores all durable application, review and complaint data. Alembic owns schema changes.
+> The system does not establish a violation, ownership or identity. Its outputs are leads for review, not automated enforcement decisions.
 
-Collected observations are not verified identities and do not establish a violation or vehicle ownership.
+## Deliverables
 
-## Access and accounts
+- [Demo video / pitch](ADD_DEMO_VIDEO_URL)
+- [Presentation](ADD_PRESENTATION_URL)
+- [Live demo](ADD_LIVE_DEMO_URL)
 
-All working pages and internal `/api/*` endpoints require a signed JWT stored in an HttpOnly, SameSite cookie. Tokens are never stored in `localStorage`.
+## Problem, users and outcome
 
-- `citizen` / «Гражданин»: manages an account, submits complaints and sees only their own complaints.
-- `worker` / «Сотрудник»: uses the existing analytical system and processes complaints.
-- `admin` / «Администратор»: has all worker access plus `/admin/users` account management.
+| Aspect | Description |
+| --- | --- |
+| Problem | Public transport announcements are heterogeneous, frequently duplicated and difficult to review manually. Important route, contact and vehicle signals remain scattered across text and images. |
+| Primary user | Transport-control analyst or municipal employee who investigates patterns and prioritises a review queue. |
+| Citizen user | A citizen who can submit and track an independent complaint without seeing internal Telegram observations. |
+| Outcome | Faster triage of messages, evidence-linked profiles and a transparent basis for human review. |
 
-Citizens cannot access collected Telegram data, profiles, vehicles, graph, review, conflicts, sources, quality or internal API. Workers cannot open administration. Server-side checks return an HTML 403 page for browser requests and JSON 403 for API requests.
+## Technical stack
 
-Local registration is email-only and always creates an active citizen account. Email addresses are validated and normalized on the server for registration, local login, administration, Google linking and bootstrap. Passwords must contain at least 12 characters and are stored only as bcrypt hashes. Google OAuth/OIDC uses a verified Google email; matching local accounts are linked instead of duplicated. When configured, the login page renders the official Google Identity Services button; otherwise it keeps local login usable with the localized disabled fallback.
+| Category | Technologies |
+| --- | --- |
+| Core | Python 3.12, FastAPI, Uvicorn, Jinja2, HTMX, Alpine.js, Tailwind CSS |
+| Data | PostgreSQL 16, SQLAlchemy 2 async ORM, asyncpg, Alembic |
+| AI / data-driven | Rule-based NLP classification, phone/route/vehicle extraction, FastALPR ONNX, OCR, evidence-based profile resolution and priority scoring |
+| Integration | Telethon for public Telegram sources, Google OAuth/OIDC through Authlib |
+| Infrastructure | Docker Compose, Docker, systemd deployment units, pnpm |
 
-An administrator can search, filter, create, edit, block, soft-delete and assign roles to accounts. Soft deletion preserves complaint and action history. The last active administrator cannot be deleted, blocked or demoted.
+## Architecture
 
-## Environment
-
-Copy `.env.example` to `.env`. At minimum configure `DATABASE_URL` and a strong `JWT_SECRET`.
-
-```text
-JWT_SECRET=
-JWT_EXPIRE_MINUTES=480
-DEFAULT_ADMIN_EMAIL=
-DEFAULT_ADMIN_PASSWORD=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=
+```mermaid
+flowchart LR
+    TG[Public Telegram sources] --> C[Telethon collector]
+    C --> DB[(PostgreSQL)]
+    C --> AQ[Text-analysis jobs]
+    C --> MQ[Media-processing jobs]
+    AQ --> TW[Text worker]
+    MQ --> MW[Media worker]
+    TW --> DB
+    MW --> DB
+    DB --> PW[Profile-resolution worker]
+    PW --> DB
+    DB --> API[FastAPI + Jinja2/HTMX]
+    API --> S[Staff workspace]
+    API --> U[Citizen complaints]
+    S --> R[Human review and corrections]
+    R --> DB
 ```
 
-On first API start, `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` create one active administrator. The password must be at least 12 characters. Bootstrap is idempotent for an existing active, non-deleted administrator and never rotates its password. If the configured email belongs to a citizen, worker, blocked or deleted account, startup stops with a configuration error: choose another `DEFAULT_ADMIN_EMAIL` or correct the conflicting account. Do not place real passwords, Google secrets, Telegram sessions or review exports in Git.
+### Data flow
 
-## Pages and API
+1. The collector receives messages only from configured public sources and stores the original text, metadata and media jobs.
+2. The text worker classifies the message and extracts phones, routes, locations and vehicles. The media worker downloads images and runs licence-plate detection.
+3. The profile worker combines repeated, explainable identifiers into observed profiles, vehicle links and possible conflicts.
+4. The staff workspace shows each result together with its source message, matched rules, confidence and evidence. A reviewer can correct the message type without changing the original observation.
 
-- Public: `/auth/login`, `/auth/register`, Google callback, static files and `/health`.
-- All authenticated users: `/account` (the legacy `/auth/account` redirects here), `/auth/me`.
-- Citizen: `/complaints`, `/complaints/new`, `/complaints/{id}`.
-- Staff: `/`, `/sources`, `/messages`, `/review`, `/profiles`, `/vehicles`, `/graph`, `/conflicts`, `/quality` and internal `/api/*`.
-- Administrator: `/admin/users`.
+```mermaid
+sequenceDiagram
+    participant T as Telegram source
+    participant C as Collector
+    participant A as Analysis workers
+    participant P as Profile resolver
+    participant R as Reviewer
+    participant D as PostgreSQL
 
-The graph has a bounded API response and discloses truncation. Profiles, vehicles, profile/vehicle timelines and conflicts use visible pagination. Evidence links use the internal message ID and do not rely on full-text search.
+    T->>C: Public message or image
+    C->>D: Save source evidence and enqueue jobs
+    A->>D: Save type, entities, routes and plate detections
+    P->>D: Save profile links, score and conflicts
+    R->>D: Confirm or correct the proposed message type
+    Note over R,D: Human judgement is separate from automatic analysis
+```
+
+## AI / data-driven component
+
+SaparGuard uses deterministic, inspectable processing rather than a black-box decision model.
+
+```mermaid
+flowchart TD
+    M[Original message] --> CL[Message-type classifier]
+    M --> EX[Entity extractors]
+    I[Attached image] --> CV[FastALPR + OCR]
+    CL --> E[Type, confidence, matched rules]
+    EX --> E2[Phones, routes, locations, vehicles]
+    CV --> E3[Licence plate candidates]
+    E --> PR[Profile resolver and priority score]
+    E2 --> PR
+    E3 --> PR
+    PR --> H[Human review queue]
+```
+
+### Explainability and human control
+
+- The interface preserves the original message and displays classification confidence and matched rule evidence.
+- Extracted phones, routes, vehicles and plate candidates are linked back to a concrete message or media file.
+- Priority scores are based on visible factors such as recurring observations, route and vehicle evidence; they are not a legal or enforcement decision.
+- Review annotations are stored separately from automatic analysis. A staff member can confirm, correct, skip or leave a draft annotation.
+- Citizen accounts, internal staff accounts and observed Telegram authors are distinct data domains.
+
+## Data
+
+The prototype uses messages and images collected from configured public Telegram transport sources. Synthetic fixtures in `evaluation/datasets/` are included only for repeatable smoke checks; they are not a claim of production quality.
+
+| Dataset layer | Main fields | Processing |
+| --- | --- | --- |
+| Source message | source, Telegram message ID, text, publication time, media marker | Deduplication by source/message ID and queueing for processing |
+| Text analysis | message type, confidence, rule evidence, phones, routes, locations, vehicles | Normalisation and deterministic extraction |
+| Media analysis | MIME type, image path, OCR plate candidates, confidence | Image processing and plate normalisation |
+| Observed profile | evidence links, first/last seen, vehicle relations, priority factors | Profile resolution with conflict tracking |
+| Human review | expected message type, comment, status, source-text hash | Keeps human judgement separate and detects stale annotations |
+
+### Data limits
+
+- Only configured public sources are processed; the dataset is not representative of all transport activity.
+- Extraction quality depends on language variation, informal spelling, image quality and incomplete announcements.
+- A detected contact, vehicle or plate is an observation, not verified ownership or a violation.
+- Personal data, Telegram sessions, reviewed exports, database backups and secrets must not be committed.
+
+## Architecture decisions
+
+1. **FastAPI and async SQLAlchemy** — collection, API requests and workers perform network/database I/O concurrently; async support avoids blocking the application while Telegram or PostgreSQL is active.
+2. **PostgreSQL as the durable system of record** — messages, jobs, evidence, review corrections and complaints require transactional consistency and migration-controlled schema changes. Alembic owns all schema evolution.
+3. **Separate workers instead of synchronous request processing** — ingestion remains responsive while text analysis, image processing and profile resolution can retry independently and expose queue status to operators.
+
+## Quick start with Docker Compose
+
+### Prerequisites
+
+- Docker Desktop or Docker Engine with Compose v2
+- Telegram API credentials from [my.telegram.org/apps](https://my.telegram.org/apps) to run the collector
+
+```bash
+cp .env.example .env
+```
+
+Set at least the following in `.env`:
+
+```text
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+JWT_SECRET=
+DEFAULT_ADMIN_EMAIL=
+DEFAULT_ADMIN_PASSWORD=
+```
+
+For Docker Compose, the application services use PostgreSQL at:
+
+```text
+postgresql+asyncpg://saparguard:saparguard@postgres:5432/saparguard
+```
+
+The Compose service is deliberately named `postgres`; use `postgres` as the host inside containers. The local `.env.example` URL uses `localhost` only for running the app outside Docker.
+
+Start the stack:
+
+```bash
+docker compose up --build
+```
+
+Compose waits for PostgreSQL, applies Alembic migrations, then starts the API, collector, text-analysis worker and profile-resolution worker. Open `http://localhost:8000` after startup.
+
+For the first Telethon session, use the configured `TELEGRAM_AUTH_MODE` (`phone` by default; `qr` is also supported) and keep the generated session file outside Git.
 
 ## Local development
 
@@ -60,39 +174,29 @@ python3.12 -m venv .venv
 corepack enable
 cd web-assets && pnpm install --frozen-lockfile && pnpm build && cd ..
 cp .env.example .env
-# configure DATABASE_URL, JWT_SECRET and optional Telegram/Google settings
 .venv/bin/alembic upgrade head
 .venv/bin/uvicorn app.main:app --reload
-# separate terminals, as required
+```
+
+Run these processes in separate terminals when required:
+
+```bash
 .venv/bin/python -m app.collector.service
 .venv/bin/python -m app.processing.text.worker
 .venv/bin/python -m app.processing.profiles.worker
 ```
 
-For CSS/asset watch mode use `cd web-assets && pnpm dev`. No frontend dependency is loaded from a CDN.
+Use `cd web-assets && pnpm dev` for frontend asset watch mode.
 
-## Docker and systemd
+## Roles and key routes
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+| Role | Scope |
+| --- | --- |
+| Citizen | Account management, complaint submission and own complaint history |
+| Worker | Dashboard, sources, messages, review, profiles, vehicles, graph, conflicts and quality controls |
+| Administrator | Worker access plus user management |
 
-The Compose migration service runs `alembic upgrade head` before API and workers. It does not reset PostgreSQL data. For a non-Docker deployment, build the bundle with `./scripts/prepare_deploy.sh` and install it with `scripts/install.sh`; systemd unit files live in `deployment/systemd/`.
-
-## Review and evaluation
-
-Synthetic fixtures in `evaluation/datasets` are smoke tests only; they do not demonstrate production quality. Human-reviewed data must remain in access-controlled local storage and must not be committed.
-
-Prepare a 100–200 message reviewed dataset with at least 20–30 samples per important message type, separate positive/negative examples, images with and without plates, and profile pairs for both same-subject and different-subject cases. Export false-positive and false-negative reports after review.
-
-```bash
-.venv/bin/python -m app.evaluation.export_reviewed \
-  --output-dir evaluation/local-reviewed --min-reviewed 1 --include-sensitive-values
-.venv/bin/python -m app.evaluation.cli run \
-  --dataset-dir evaluation/local-reviewed/human-reviewed-... \
-  --output-dir evaluation/local-reviewed/reports
-```
+Public health check: `/health`.
 
 ## Verification
 
@@ -104,8 +208,8 @@ Prepare a 100–200 message reviewed dataset with at least 20–30 samples per i
 docker compose config
 ```
 
-Integration tests require an isolated `POSTGRES_TEST_URL` whose database name ends in `_test` or `_integration`; see [the integration-test guide](docs/postgresql-integration-tests.md). Browser smoke testing must use a clean PostgreSQL instance and verify login, fallback Google UI, complaint handling, role boundaries, filters, pagination, evidence links and all staff pages.
+Integration tests require an isolated `POSTGRES_TEST_URL` whose database name ends in `_test` or `_integration`. See [docs/postgresql-integration-tests.md](docs/postgresql-integration-tests.md).
 
-## Limits
+## Repository safety
 
-The system processes only configured Telegram sources. Extraction and scoring are deterministic, evidence-backed aids for review, not a decision system. Google login requires valid Google OAuth configuration. Feature work is frozen after this release; subsequent changes should be bug fixes, tests and reliability improvements only.
+Do not commit `.env`, Telegram sessions, database backups, media files, reviewed exports, generated evaluation reports or credentials. Use `.env.example` as the configuration template and generate a unique `JWT_SECRET` for every environment.

@@ -11,9 +11,17 @@ __pycache__/
 venv/
 logs/
 evaluation/local-reviewed/
+evaluation/reports/evaluation-*
 deploy/
 web-assets/node_modules/
 app/web/static/css/
 app/web/static/js/
 app/web/static/vendor/
+.codegraph/
+.playwright-mcp/
+.pnpm-store/
+.serena/
+backups/
+project-context.md
+ТЗ - GovTech Camp - отб. этап.md
 !.gitkeep
