@@ -389,6 +389,12 @@ async def save_annotation(
     if status == "reviewed" and not message_type:
         raise ValueError("Для подтверждения нужен ожидаемый тип сообщения")
     values = normalize_annotation_values(phones, routes, vehicles)
+    annotation_phones = [AnnotationPhone(normalized_value=value) for value in values[0]]
+    annotation_routes = [
+        AnnotationRoute(normalized_origin=origin, normalized_destination=destination)
+        for origin, destination in values[1]
+    ]
+    annotation_vehicles = [AnnotationVehicle(normalized_value=value) for value in values[2]]
     now = datetime.now(timezone.utc)
     annotation = await session.scalar(
         select(MessageAnnotation)
@@ -411,9 +417,11 @@ async def save_annotation(
             created_at=now,
             updated_at=now,
             reviewed_at=now if status == "reviewed" else None,
+            phones=annotation_phones,
+            routes=annotation_routes,
+            vehicles=annotation_vehicles,
         )
         session.add(annotation)
-        await session.flush()
     else:
         annotation.status = status
         annotation.annotator = annotator.strip()
@@ -428,11 +436,7 @@ async def save_annotation(
         annotation.phones.clear()
         annotation.routes.clear()
         annotation.vehicles.clear()
-        await session.flush()
-    annotation.phones.extend(AnnotationPhone(normalized_value=value) for value in values[0])
-    annotation.routes.extend(
-        AnnotationRoute(normalized_origin=origin, normalized_destination=destination)
-        for origin, destination in values[1]
-    )
-    annotation.vehicles.extend(AnnotationVehicle(normalized_value=value) for value in values[2])
+        annotation.phones.extend(annotation_phones)
+        annotation.routes.extend(annotation_routes)
+        annotation.vehicles.extend(annotation_vehicles)
     return annotation

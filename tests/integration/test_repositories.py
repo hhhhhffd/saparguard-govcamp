@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.database.models import (
     ExtractedEntity,
     MediaProcessingJob,
+    MessageAnnotation,
     MessageAnalysis,
     MessageAnalysisJob,
     ProfileOccurrence,
@@ -29,6 +30,7 @@ from app.database.repositories import (
 )
 from app.processing.text.analyzer import analyze_message
 from app.processing.profiles.repository import ProfileResolutionRepository
+from app.review.service import save_annotation
 
 pytestmark = pytest.mark.integration
 
@@ -107,6 +109,38 @@ async def test_message_and_media_job_rollback_together(
 
     assert messages == 0
     assert jobs == 0
+
+
+@pytest.mark.asyncio
+async def test_first_type_only_annotation_is_saved(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.begin() as session:
+        await create_chat(session)
+        message = await MessageRepository(session).upsert_message(
+            message_values(1), save_edit=False
+        )
+
+    async with session_factory.begin() as session:
+        await save_annotation(
+            session,
+            message_id=message.id,
+            status="draft",
+            annotator="integration-test",
+            message_type="driver_offer",
+            phones=[],
+            routes=[],
+            vehicles=[],
+            comment="Type only",
+            source_text="message 1",
+        )
+
+    async with session_factory() as session:
+        annotation = await session.scalar(select(MessageAnnotation))
+
+    assert annotation is not None
+    assert annotation.status == "draft"
+    assert annotation.expected_message_type == "driver_offer"
 
 
 @pytest.mark.asyncio
