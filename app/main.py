@@ -49,7 +49,13 @@ async def lifespan(_: FastAPI):
     logger.info("API application stopped")
 
 
-app = FastAPI(title="SaparGuard Telegram Collector", lifespan=lifespan)
+app = FastAPI(
+    title="SaparGuard Telegram Collector",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.jwt_secret or "saparguard-invalid-auth-configuration",
@@ -154,7 +160,7 @@ def _access_denied_response(request: Request, status_code: int, message: str):
 
 
 def _apply_web_security_headers(request: Request, response):
-    excluded_paths = ("/api", "/docs", "/redoc", "/openapi.json", "/static", "/health")
+    excluded_paths = ("/api", "/static", "/health")
     if request.url.path.startswith(excluded_paths):
         return response
     response.headers["X-Content-Type-Options"] = "nosniff"

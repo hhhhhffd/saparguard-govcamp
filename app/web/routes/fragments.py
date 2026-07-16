@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.database.repositories import MessageRepository, SourceRepository
 from app.database.session import get_session
-from app.web.routes.pages import DEFAULT_PAGE_SIZE, message_page_context
+from app.web.routes.pages import DEFAULT_PAGE_SIZE, message_page_context, parse_optional_identifier
 from app.web.templating import templates
 
 router = APIRouter(prefix="/ui/fragments")
@@ -23,8 +23,8 @@ async def messages_table(
     cursor_sent_at: datetime | None = None,
     cursor_id: int | None = None,
     query: str | None = None,
-    chat_id: int | None = None,
-    sender_id: int | None = None,
+    chat_id: str | None = None,
+    sender_id: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     message_type: str | None = None,
@@ -38,8 +38,8 @@ async def messages_table(
         cursor_sent_at=cursor_sent_at,
         cursor_id=cursor_id,
         query=query,
-        chat_id=chat_id,
-        sender_id=sender_id,
+        chat_id=parse_optional_identifier(chat_id, "chat_id"),
+        sender_id=parse_optional_identifier(sender_id, "sender_id"),
         date_from=date_from,
         date_to=date_to,
         message_type=message_type,

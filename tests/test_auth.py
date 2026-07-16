@@ -138,6 +138,16 @@ def test_login_shows_localized_google_fallback() -> None:
     assert "accounts.google.com/gsi/client" not in response.text
 
 
+def test_api_documentation_routes_are_disabled() -> None:
+    from app.main import app
+
+    paths = {route.path for route in app.routes}
+
+    assert "/docs" not in paths
+    assert "/redoc" not in paths
+    assert "/openapi.json" not in paths
+
+
 def test_anonymous_user_can_switch_interface_language() -> None:
     from app.main import app
 

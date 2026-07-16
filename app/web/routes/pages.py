@@ -46,6 +46,39 @@ router = APIRouter()
 DEFAULT_PAGE_SIZE = 50
 
 
+def parse_optional_identifier(value: str | None, field_name: str) -> int | None:
+    """Convert optional form IDs while treating empty inputs as absent filters."""
+    normalized_value = value.strip() if value else ""
+    if not normalized_value:
+        return None
+    try:
+        return int(normalized_value)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a number") from error
+
+
+def parse_optional_number(value: str | None, field_name: str) -> float | None:
+    """Convert optional decimal form values while treating empty inputs as absent filters."""
+    normalized_value = value.strip() if value else ""
+    if not normalized_value:
+        return None
+    try:
+        return float(normalized_value)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a number") from error
+
+
+def parse_optional_datetime(value: str | None, field_name: str) -> datetime | None:
+    """Convert optional ISO date form values while treating empty inputs as absent filters."""
+    normalized_value = value.strip() if value else ""
+    if not normalized_value:
+        return None
+    try:
+        return datetime.fromisoformat(normalized_value)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a valid date") from error
+
+
 def _review_filters_context(request: Request) -> dict[str, str]:
     return {
         key: request.query_params.get(key, "")
@@ -321,8 +354,8 @@ async def messages_page(
     cursor_sent_at: datetime | None = None,
     cursor_id: int | None = None,
     query: str | None = None,
-    chat_id: int | None = None,
-    sender_id: int | None = None,
+    chat_id: str | None = None,
+    sender_id: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     message_type: str | None = None,
@@ -336,8 +369,8 @@ async def messages_page(
         cursor_sent_at=cursor_sent_at,
         cursor_id=cursor_id,
         query=query,
-        chat_id=chat_id,
-        sender_id=sender_id,
+        chat_id=parse_optional_identifier(chat_id, "chat_id"),
+        sender_id=parse_optional_identifier(sender_id, "sender_id"),
         date_from=date_from,
         date_to=date_to,
         message_type=message_type,
@@ -359,8 +392,8 @@ async def profiles_page(
     vehicle: str | None = None,
     has_conflicts: bool | None = None,
     query: str | None = None,
-    score_min: int | None = None,
-    score_max: int | None = None,
+    score_min: str | None = None,
+    score_max: str | None = None,
     score_level: str | None = None,
     page: int = 1,
     limit: int = 50,
@@ -416,8 +449,8 @@ async def profiles_page(
         session,
         candidate_ids,
         generated_at=datetime.now(timezone.utc),
-        score_min=score_min,
-        score_max=score_max,
+        score_min=parse_optional_identifier(score_min, "score_min"),
+        score_max=parse_optional_identifier(score_max, "score_max"),
         score_level=score_level,
     )
     page = max(page, 1)
@@ -863,13 +896,13 @@ async def review_page(
     index: int = 0,
     limit: int = 50,
     seed: int = 0,
-    source_id: int | None = None,
+    source_id: str | None = None,
     annotation_status: str | None = None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     message_type: str | None = None,
-    confidence_min: float | None = None,
-    confidence_max: float | None = None,
+    confidence_min: str | None = None,
+    confidence_max: str | None = None,
     has_phone: bool | None = None,
     has_route: bool | None = None,
     has_vehicle: bool | None = None,
@@ -891,13 +924,13 @@ async def review_page(
         queue = await select_review_queue(
             session,
             ReviewFilters(
-                source_id=source_id,
+                source_id=parse_optional_identifier(source_id, "source_id"),
                 annotation_status=annotation_status,
-                date_from=date_from,
-                date_to=date_to,
+                date_from=parse_optional_datetime(date_from, "date_from"),
+                date_to=parse_optional_datetime(date_to, "date_to"),
                 message_type=message_type,
-                confidence_min=confidence_min,
-                confidence_max=confidence_max,
+                confidence_min=parse_optional_number(confidence_min, "confidence_min"),
+                confidence_max=parse_optional_number(confidence_max, "confidence_max"),
                 has_phone=has_phone,
                 has_route=has_route,
                 has_vehicle=has_vehicle,

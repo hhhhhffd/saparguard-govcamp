@@ -19,6 +19,7 @@ from app.processing.media.image_processor import save_optimized_image
 from app.database.repositories.media_jobs import MediaJobRepository
 from app.web import templating
 from app.web.routes import fragments
+from app.web.routes.pages import parse_optional_identifier, parse_optional_number
 from app.web.templating import templates
 
 
@@ -29,6 +30,18 @@ def test_history_window_rejects_old_messages() -> None:
 
 def test_normalize_plate_removes_formatting() -> None:
     assert normalize_plate("a 123 bc-02") == "A123BC02"
+
+
+def test_optional_identifier_treats_empty_form_values_as_absent() -> None:
+    assert parse_optional_identifier("", "chat_id") is None
+    assert parse_optional_identifier("  ", "sender_id") is None
+    assert parse_optional_identifier("123", "chat_id") == 123
+
+
+def test_optional_number_treats_empty_form_values_as_absent() -> None:
+    assert parse_optional_number("", "score_min") is None
+    assert parse_optional_number("  ", "score_max") is None
+    assert parse_optional_number("12.5", "score_min") == 12.5
 
 
 @pytest.mark.asyncio
@@ -191,7 +204,7 @@ def test_message_rows_use_infinite_scroll() -> None:
     assert "append=true" in rendered
 
 
-def test_messages_table_uses_equal_width_columns_and_truncates_content() -> None:
+def test_messages_table_uses_fixed_columns_and_truncates_content() -> None:
     message = SimpleNamespace(
         id=1,
         published_at=datetime.now(timezone.utc),
@@ -208,9 +221,9 @@ def test_messages_table_uses_equal_width_columns_and_truncates_content() -> None
         messages=[message], has_more=False
     )
 
-    assert "table-fixed" in rendered
-    assert rendered.count('class="w-1/6"') == 6
-    assert "truncate" in rendered
+    assert 'class="messages-table"' in rendered
+    assert rendered.count("<col class=\"messages-") == 9
+    assert 'class="messages-table-scroll"' in rendered
     assert 'data-message-detail-url="/ui/fragments/messages/1"' in rendered
 
 

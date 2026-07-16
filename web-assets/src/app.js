@@ -14,7 +14,7 @@ document.addEventListener("htmx:sendError", () =>
   showError("Сервермен байланыс жоқ / Нет соединения с сервером."),
 );
 document.addEventListener("htmx:afterRequest", (event) => {
-  if (event.target instanceof Element && event.target.matches("[data-open-message-detail]")) {
+  if (event.detail.successful && event.target instanceof Element && event.target.matches("[data-open-message-detail]")) {
     document.querySelector("#message-detail-dialog")?.showModal();
   }
 });
@@ -133,6 +133,35 @@ function initSidebarToggle() {
   });
 }
 
+function initTopNavScroll() {
+  const navigation = document.querySelector("[data-top-nav]");
+  if (!(navigation instanceof HTMLElement)) return;
+
+  const controls = document.querySelectorAll("[data-nav-scroll]");
+  const updateControls = () => {
+    const hasOverflow = navigation.scrollWidth > navigation.clientWidth;
+    controls.forEach((control) => {
+      control.hidden = !hasOverflow;
+      if (control instanceof HTMLButtonElement) {
+        const direction = control.dataset.navScroll;
+        control.disabled = direction === "left"
+          ? navigation.scrollLeft <= 0
+          : navigation.scrollLeft + navigation.clientWidth >= navigation.scrollWidth - 1;
+      }
+    });
+  };
+
+  controls.forEach((control) => {
+    control.addEventListener("click", () => {
+      const direction = control.dataset.navScroll === "left" ? -1 : 1;
+      navigation.scrollBy({ left: direction * Math.round(navigation.clientWidth * 0.7), behavior: "smooth" });
+    });
+  });
+  navigation.addEventListener("scroll", updateControls, { passive: true });
+  new ResizeObserver(updateControls).observe(navigation);
+  updateControls();
+}
+
 async function initGraph() {
   const container = document.querySelector("#relationship-graph");
   if (!container) return;
@@ -187,3 +216,4 @@ async function initGraph() {
 initGraph();
 initComplaintForm();
 initSidebarToggle();
+initTopNavScroll();
