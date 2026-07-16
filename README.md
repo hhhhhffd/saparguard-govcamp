@@ -1,5 +1,7 @@
 # SaparGuard
 
+[Русская версия](docs/README.ru.md)
+
 SaparGuard is a GovTech decision-support prototype for monitoring public intercity transport announcements in Telegram. It turns an unstructured stream of messages and images into explainable observations: message types, contacts, routes, vehicles, licence-plate detections and evidence-backed profiles.
 
 The core problem is that transport-control staff cannot manually and consistently review a large, fast-changing flow of public announcements. SaparGuard automates collection and primary analysis, ranks observations for attention and preserves the original evidence; a responsible employee remains the final decision-maker.

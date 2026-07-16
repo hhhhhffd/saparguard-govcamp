@@ -1,5 +1,7 @@
 # Manual Telegram and ALPR smoke checklist
 
+[Русская версия](manual-smoke-checklist.ru.md)
+
 Run this only in an authorized non-production test source. Do not place Telegram credentials or session files in tests.
 
 1. Start API and the collector with `ALPR_WORKER_COUNT=1`; confirm collector connects once with its existing session.

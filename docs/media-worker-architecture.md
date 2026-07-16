@@ -1,5 +1,7 @@
 # Media worker boundary
 
+[Русская версия](media-worker-architecture.ru.md)
+
 `app.processing.media.worker` is started by `app.collector.service` as an asyncio task and receives
 the collector's existing authenticated `TelegramClient`. This is deliberate: a separate Telethon process
 using the same session file can corrupt session state or trigger Telegram authorization problems.
