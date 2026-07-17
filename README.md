@@ -11,7 +11,7 @@ The core problem is that transport-control staff cannot manually and consistentl
 ## Deliverables
 
 - [Demo video / pitch](https://youtu.be/QLD-9kvcOsw)
-- [Presentation](docs/presentation.pdf)
+- [Presentation](https://drive.google.com/file/d/1YmO1dIrT4hKsplXm3NaKLobK7Hp_PQl_/view?usp=sharing)
 
 ## Problem, users and outcome
 
