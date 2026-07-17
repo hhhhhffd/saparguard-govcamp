@@ -10,9 +10,8 @@ The core problem is that transport-control staff cannot manually and consistentl
 
 ## Deliverables
 
-- [Demo video / pitch](ADD_DEMO_VIDEO_URL)
-- [Presentation](ADD_PRESENTATION_URL)
-- [Live demo](ADD_LIVE_DEMO_URL)
+- [Demo video / pitch](https://youtu.be/QLD-9kvcOsw)
+- [Presentation](docs/presentation.pdf)
 
 ## Problem, users and outcome
 
@@ -22,6 +21,8 @@ The core problem is that transport-control staff cannot manually and consistentl
 | Primary user | Transport-control analyst or municipal employee who investigates patterns and prioritises a review queue. |
 | Citizen user | A citizen who can submit and track an independent complaint without seeing internal Telegram observations. |
 | Outcome | Faster triage of messages, evidence-linked profiles and a transparent basis for human review. |
+
+**Measurable objective.** The prototype aims to reduce the time required for initial review of public announcements through automated classification, entity extraction and prioritisation. Quality is evaluated on a manually reviewed sample of message types.
 
 ## Technical stack
 
