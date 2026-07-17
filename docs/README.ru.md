@@ -11,7 +11,7 @@ SaparGuard — GovTech-прототип системы поддержки реш
 ## Материалы
 
 - [Демо-видео / питч](https://youtu.be/QLD-9kvcOsw)
-- [Презентация](./presentation.pdf)
+- [Презентация](https://drive.google.com/file/d/1YmO1dIrT4hKsplXm3NaKLobK7Hp_PQl_/view?usp=sharing)
 
 ## Проблема, пользователи и результат
 
